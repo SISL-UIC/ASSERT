@@ -40,6 +40,7 @@ From the natural language specification, the ASSERT pipeline derives behavior ca
 - **Agent trace-grounded judgment** - the recommended integration captures OpenTelemetry spans (OpenInference auto-instruments 33+ frameworks in two lines — `from assert_ai import auto_trace; auto_trace.enable()` — or you can emit your own with the OTel SDK) so the judge can cite tool calls, routing, model calls, and latency as evidence — not just the final response.
 - **Portable artifacts** - every stage writes JSON/JSONL files locally for inspection, CI, and sharing.
 - **Bundled local viewer** - browse runs side-by-side, pin a baseline, drill into per-behavior dimension breakdowns, and read judge justifications cited against the captured traces.
+- **MCP server** - expose ASSERT to AI agents and IDEs (Claude Desktop, Copilot, Cursor) over the Model Context Protocol: an agent can browse presets, inspect runs, compare runs for regressions, pull a failing transcript into context, or run an eval — as native tools. See [`docs/guides/mcp-server.md`](docs/guides/mcp-server.md).
 
 ## Get started
 

@@ -19,6 +19,9 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
+
+pytest.importorskip("mcp")
+
 from mcp.shared.memory import create_connected_server_and_client_session as connect
 
 from assert_ai.mcp.server import build_server
