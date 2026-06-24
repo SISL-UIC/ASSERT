@@ -76,6 +76,12 @@ regression = [
   "scipy>=1.11.0",
   "numpy>=2.0.0",
 ]
+# Expose ASSERT as an MCP server so AI agents/IDEs (Claude Desktop, Copilot,
+# Cursor) can drive evaluations as a tool. Strictly additive: the base install
+# and CLI are unaffected when this extra is not installed.
+mcp = [
+  "mcp>=1.2",
+]
 # Optional Entra ID / Managed Identity auth for Azure OpenAI calls.
 # Lets users on `az login`, system-assigned MI, or user-assigned MI skip
 # `AZURE_API_KEY` entirely. Strictly additive: the base install keeps
@@ -120,7 +126,7 @@ examples = [
   "openinference-instrumentation-crewai>=0.1.17,<0.1.18",
 ]
 all = [
-  "assert-ai[otel,langgraph,analysis,examples,regression,azure-aad,acs]",
+  "assert-ai[otel,langgraph,analysis,examples,regression,azure-aad,acs,mcp]",
 ]
 dev = [
   "pytest>=9.0.3",
@@ -129,6 +135,7 @@ dev = [
 
 [project.scripts]
 assert-ai = "assert_ai.cli:cli"
+assert-ai-mcp = "assert_ai.mcp.server:main"
 
 [project.urls]
 Homepage = "https://github.com/responsibleai/ASSERT"
