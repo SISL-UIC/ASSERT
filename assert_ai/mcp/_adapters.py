@@ -23,7 +23,9 @@ from pathlib import Path
 from typing import Any
 
 from assert_ai import results as results_api
+from assert_ai.core.io import load_jsonl
 from assert_ai.library import loader
+from assert_ai.mcp._security import safe_subpath
 
 # Keys on a run summary that carry full per-test-case transcripts/verdicts. They
 # are stripped from tool output and exposed through resources on demand.
@@ -67,6 +69,68 @@ def get_run(results_dir: Path, suite: str, run: str) -> dict[str, Any]:
             f"Run {suite}/{run} not found or has no readable artifacts under {results_dir}."
         )
     return strip_run_rows(summary)
+
+
+def compare_runs(
+    results_dir: Path,
+    suite: str,
+    run_a: str,
+    run_b: str,
+    metric: str = "policy_violation",
+) -> dict[str, Any]:
+    """Compare two runs in a suite: headline rate deltas + per-behavior deltas.
+
+    Returns only computed deltas/metrics — no heavy transcript rows.
+    """
+    return results_api.compute_run_comparison(
+        results_dir, suite, [run_a, run_b], metric=metric
+    )
+
+
+def get_transcript(
+    results_dir: Path, suite: str, run: str, case_id: str
+) -> dict[str, Any]:
+    """Return one test case's full conversation transcript and judge verdict.
+
+    Reads the run's ``inference_set.jsonl`` (events = the conversation) and joins
+    the matching ``scores.jsonl`` verdict. Suite/run are validated against path
+    traversal before any file access.
+
+    Raises:
+        ValueError: on traversal, a missing inference set, or an unknown case id.
+    """
+    run_dir = safe_subpath(results_dir, suite, run)
+    inference_path = run_dir / "inference_set.jsonl"
+    if not inference_path.is_file():
+        raise ValueError(f"No inference_set.jsonl for {suite}/{run}.")
+
+    match: dict[str, Any] | None = None
+    for row in load_jsonl(inference_path):
+        if row.get("test_case_id") == case_id:
+            match = row
+            break
+    if match is None:
+        raise ValueError(f"Test case {case_id!r} not found in {suite}/{run}.")
+
+    verdict: Any = None
+    scores_path = run_dir / "scores.jsonl"
+    if scores_path.is_file():
+        for row in load_jsonl(scores_path):
+            if row.get("test_case_id") == case_id:
+                verdict = row.get("verdict")
+                break
+
+    return {
+        "suite": suite,
+        "run": run,
+        "test_case_id": case_id,
+        "type": match.get("type"),
+        "behavior": match.get("behavior"),
+        "target": match.get("target"),
+        "events": match.get("events"),
+        "llm_calls": match.get("llm_calls"),
+        "verdict": verdict,
+    }
 
 
 def list_presets(kind: str | None = None) -> list[dict[str, Any]]:

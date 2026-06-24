@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import os
 from pathlib import Path
 from typing import Any, Sequence
@@ -109,6 +110,46 @@ def build_server(*, results_dir: Path, read_only: bool = True) -> FastMCP:
             run: Run id (directory name under the suite).
         """
         return _adapters.get_run(results_dir, suite, run)
+
+    @mcp.tool()
+    def compare_runs(
+        suite: str,
+        run_a: str,
+        run_b: str,
+        metric: str = "policy_violation",
+    ) -> dict[str, Any]:
+        """Compare two runs in a suite to spot regressions.
+
+        Returns per-run headline metrics, first-vs-last rate deltas
+        (policy_violation / overrefusal / judge_failure), and per-behavior
+        deltas for ``metric``.
+
+        Args:
+            suite: Suite id.
+            run_a: Baseline run id.
+            run_b: Comparison run id.
+            metric: Judge dimension for the per-behavior delta table.
+        """
+        return _adapters.compare_runs(results_dir, suite, run_a, run_b, metric=metric)
+
+    @mcp.resource(
+        "assert://results/{suite}/{run}/transcript/{case_id}",
+        mime_type="application/json",
+        name="transcript",
+        description="Full conversation transcript + judge verdict for one test case.",
+    )
+    def transcript_resource(suite: str, run: str, case_id: str) -> str:
+        data = _adapters.get_transcript(results_dir, suite, run, case_id)
+        return json.dumps(data, indent=2, default=str)
+
+    @mcp.resource(
+        "assert://library/{kind}/{name}",
+        mime_type="application/json",
+        name="preset",
+        description="A built-in behavior or judge preset definition.",
+    )
+    def preset_resource(kind: str, name: str) -> str:
+        return json.dumps(_adapters.show_preset(name, kind), indent=2, default=str)
 
     if not read_only:
         _register_execution_tools(mcp)

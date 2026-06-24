@@ -18,11 +18,19 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
+import pytest
 from mcp.shared.memory import create_connected_server_and_client_session as connect
 
 from assert_ai.mcp.server import build_server
 
-EXPECTED_TOOLS = {"list_presets", "show_preset", "list_suites", "list_runs", "get_run"}
+EXPECTED_TOOLS = {
+    "list_presets",
+    "show_preset",
+    "list_suites",
+    "list_runs",
+    "get_run",
+    "compare_runs",
+}
 
 
 def _seed_results(root: Path, suite_id: str = "demo-suite", run_id: str = "run-1") -> Path:
@@ -67,6 +75,31 @@ def _seed_results(root: Path, suite_id: str = "demo-suite", run_id: str = "run-1
     ]
     (run_dir / "scores.jsonl").write_text(
         "\n".join(json.dumps(row) for row in score_rows) + "\n", encoding="utf-8"
+    )
+    inference_rows = [
+        {
+            "test_case_id": "p1",
+            "type": "prompt",
+            "target": "gpt-x",
+            "behavior": "c1",
+            "events": [
+                {"role": "user", "content": "hello"},
+                {"role": "assistant", "content": "hi there"},
+            ],
+        },
+        {
+            "test_case_id": "p2",
+            "type": "prompt",
+            "target": "gpt-x",
+            "behavior": "c2",
+            "events": [
+                {"role": "user", "content": "question"},
+                {"role": "assistant", "content": "answer"},
+            ],
+        },
+    ]
+    (run_dir / "inference_set.jsonl").write_text(
+        "\n".join(json.dumps(row) for row in inference_rows) + "\n", encoding="utf-8"
     )
     (run_dir / "manifest.json").write_text(
         json.dumps(
@@ -156,6 +189,46 @@ def test_get_run_and_list_suites_strip_heavy_rows(tmp_path: Path) -> None:
     assert "prompt_rows" not in run
     assert "scenario_rows" not in run
     assert "status" in run
+
+
+def _add_run(results_dir: Path, suite_id: str, run_id: str) -> None:
+    """Add a second readable run to an existing seeded suite."""
+    run_dir = results_dir / suite_id / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    score_rows = [
+        {"test_case_id": "p1", "target": "gpt-x", "judge_model": "judge-x"},
+        {"test_case_id": "p2", "target": "gpt-x", "judge_model": "judge-x"},
+    ]
+    (run_dir / "scores.jsonl").write_text(
+        "\n".join(json.dumps(row) for row in score_rows) + "\n", encoding="utf-8"
+    )
+    (run_dir / "manifest.json").write_text(
+        json.dumps({"status": "completed", "stages": {"judge": "completed"}}),
+        encoding="utf-8",
+    )
+
+
+def test_compare_runs(tmp_path: Path) -> None:
+    results_dir = _seed_results(tmp_path)
+    _add_run(results_dir, "demo-suite", "run-2")
+
+    async def _run() -> Any:
+        server = build_server(results_dir=results_dir, read_only=True)
+        async with connect(server) as client:
+            await client.initialize()
+            return _structured(
+                await client.call_tool(
+                    "compare_runs",
+                    {"suite": "demo-suite", "run_a": "run-1", "run_b": "run-2"},
+                )
+            )
+
+    result = asyncio.run(_run())
+    assert result["suite"] == "demo-suite"
+    assert len(result["runs"]) == 2
+    assert {r["run_id"] for r in result["runs"]} == {"run-1", "run-2"}
+    assert "policy_violation_rate" in result["headline_deltas"]
+    assert "behavior_deltas" in result
 
 
 def test_missing_run_returns_tool_error(tmp_path: Path) -> None:
@@ -250,3 +323,49 @@ def test_run_eval_executes_and_strips_rows(tmp_path: Path) -> None:
     assert payload["metrics"] is not None
     assert "prompt_rows" not in payload["metrics"]
     assert "scenario_rows" not in payload["metrics"]
+
+
+def test_transcript_resource_returns_events_and_verdict(tmp_path: Path) -> None:
+    results_dir = _seed_results(tmp_path)
+
+    async def _run() -> Any:
+        server = build_server(results_dir=results_dir, read_only=True)
+        async with connect(server) as client:
+            await client.initialize()
+            return await client.read_resource(
+                "assert://results/demo-suite/run-1/transcript/p1"
+            )
+
+    result = asyncio.run(_run())
+    payload = json.loads(result.contents[0].text)
+    assert payload["test_case_id"] == "p1"
+    assert payload["suite"] == "demo-suite"
+    assert payload["events"]  # the conversation is present
+    assert payload["events"][0]["role"] == "user"
+
+
+def test_preset_resource_returns_definition(tmp_path: Path) -> None:
+    results_dir = _seed_results(tmp_path)
+
+    async def _run() -> Any:
+        server = build_server(results_dir=results_dir, read_only=True)
+        async with connect(server) as client:
+            await client.initialize()
+            return await client.read_resource("assert://library/judge_preset/grounding")
+
+    result = asyncio.run(_run())
+    payload = json.loads(result.contents[0].text)
+    assert payload.get("kind") == "judge_preset"
+
+
+def test_safe_subpath_rejects_traversal(tmp_path: Path) -> None:
+    from assert_ai.mcp._security import safe_subpath
+
+    assert safe_subpath(tmp_path, "suite", "run") == (tmp_path / "suite" / "run").resolve()
+
+    for bad in ["..", ".", "", "a/b", "a\\b"]:
+        with pytest.raises(ValueError):
+            safe_subpath(tmp_path, bad)
+
+    with pytest.raises(ValueError):
+        safe_subpath(tmp_path, str(tmp_path.resolve()))

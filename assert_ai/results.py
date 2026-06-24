@@ -300,3 +300,108 @@ def behavior_metric_map(
             "count": bucket["count"],
         }
     return result
+
+
+def compute_run_comparison(
+    results_dir: Path,
+    suite: str,
+    run_ids: list[str],
+    *,
+    metric: str = "policy_violation",
+    limit: int = 8,
+) -> dict[str, Any]:
+    """Compare two or more runs in one suite.
+
+    Returns per-run headline metrics, first-vs-last headline rate deltas, and
+    per-behavior delta rows for ``metric``. Pure and reusable by both the CLI
+    and the MCP ``compare_runs`` tool; raises ``ValueError`` for a missing suite,
+    a missing/unreadable run, or fewer than two runs.
+    """
+    suite_dir = results_dir / suite
+    if not suite_dir.exists():
+        raise ValueError(f"Suite not found: {suite} (under {results_dir})")
+    if len(run_ids) < 2:
+        raise ValueError("compare requires at least two run ids")
+
+    summaries: list[dict[str, Any]] = []
+    for run_id in run_ids:
+        summary = load_run_summary(suite_dir / run_id)
+        if summary is None:
+            raise ValueError(f"Run not found or unreadable: {suite}/{run_id}")
+        summaries.append(summary)
+
+    headline_keys = (
+        "total",
+        "scored_total",
+        "policy_violation_rate",
+        "overrefusal_rate",
+        "judge_failure_rate",
+    )
+    runs_out: list[dict[str, Any]] = []
+    for summary in summaries:
+        prompt_metrics = summary.get("prompt_metrics") or {}
+        scenario_metrics = summary.get("scenario_metrics") or {}
+        runs_out.append(
+            {
+                "run_id": summary["run_id"],
+                "status": summary["status"],
+                "started_at": summary.get("started_at"),
+                "target": prompt_metrics.get("target") or scenario_metrics.get("target"),
+                "prompt": {key: prompt_metrics.get(key) for key in headline_keys}
+                if prompt_metrics
+                else None,
+                "scenario": {key: scenario_metrics.get(key) for key in headline_keys}
+                if scenario_metrics
+                else None,
+            }
+        )
+
+    first, last = summaries[0], summaries[-1]
+
+    def _headline_rate(summary: dict[str, Any], dimension: str) -> float | None:
+        prompt_metrics = summary.get("prompt_metrics") or {}
+        value = prompt_metrics.get(f"{dimension}_rate")
+        return float(value) if isinstance(value, (int, float)) else None
+
+    headline_deltas: dict[str, Any] = {}
+    for dimension in ("policy_violation", "overrefusal", "judge_failure"):
+        first_rate = _headline_rate(first, dimension)
+        last_rate = _headline_rate(last, dimension)
+        headline_deltas[f"{dimension}_rate"] = {
+            "first": first_rate,
+            "last": last_rate,
+            "delta": (last_rate - first_rate)
+            if (first_rate is not None and last_rate is not None)
+            else None,
+        }
+
+    behavior_deltas: list[dict[str, Any]] = []
+    if first.get("prompt_rows") and last.get("prompt_rows"):
+        first_map = behavior_metric_map(first["prompt_rows"], metric)
+        last_map = behavior_metric_map(last["prompt_rows"], metric)
+        for behavior in sorted(set(first_map) | set(last_map)):
+            before = first_map.get(behavior)
+            after = last_map.get(behavior)
+            if before is None or after is None:
+                continue
+            behavior_deltas.append(
+                {
+                    "behavior": behavior,
+                    "first_rate": before["rate"],
+                    "last_rate": after["rate"],
+                    "delta": after["rate"] - before["rate"],
+                    "first_count": before["count"],
+                    "last_count": after["count"],
+                }
+            )
+        behavior_deltas.sort(key=lambda row: abs(row["delta"]), reverse=True)
+        if limit >= 0:
+            behavior_deltas = behavior_deltas[:limit]
+
+    return {
+        "suite": suite,
+        "metric": metric,
+        "runs": runs_out,
+        "headline_deltas": headline_deltas,
+        "behavior_deltas": behavior_deltas,
+    }
