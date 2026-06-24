@@ -369,3 +369,42 @@ def test_safe_subpath_rejects_traversal(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError):
         safe_subpath(tmp_path, str(tmp_path.resolve()))
+
+
+def _load_demo_seed_module() -> Any:
+    import importlib.util
+
+    path = Path(__file__).resolve().parents[1] / "scripts" / "demo_seed_mcp.py"
+    spec = importlib.util.spec_from_file_location("demo_seed_mcp", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_demo_seed_produces_a_real_regression(tmp_path: Path) -> None:
+    seed_mod = _load_demo_seed_module()
+    results_dir = tmp_path / "results"
+    seed_mod.seed(results_dir)
+
+    async def _run() -> Any:
+        server = build_server(results_dir=results_dir, read_only=True)
+        async with connect(server) as client:
+            await client.initialize()
+            return _structured(
+                await client.call_tool(
+                    "compare_runs",
+                    {
+                        "suite": seed_mod.SUITE_ID,
+                        "run_a": "baseline",
+                        "run_b": "regressed",
+                    },
+                )
+            )
+
+    result = asyncio.run(_run())
+    policy = result["headline_deltas"]["policy_violation_rate"]
+    assert policy["first"] == 0.0
+    assert policy["last"] is not None and policy["last"] > 0.5
+    assert policy["delta"] is not None and policy["delta"] > 0.5
+    assert result["behavior_deltas"]  # per-behavior breakdown is populated
