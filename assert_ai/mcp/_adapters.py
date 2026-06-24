@@ -85,3 +85,50 @@ def show_preset(name: str, kind: str | None = None) -> dict[str, Any]:
             last_error = exc
     detail = f" ({last_error})" if last_error else ""
     raise ValueError(f"Preset {name!r} not found in {kinds}.{detail}")
+
+
+def run_eval(
+    config: str,
+    *,
+    force_stages: list[str] | None = None,
+    overrides: list[str] | None = None,
+    concurrency: int | None = None,
+) -> dict[str, Any]:
+    """Run an evaluation pipeline from a YAML config and summarize the outcome.
+
+    Delegates to ``runner.run_pipeline_result`` (imported lazily so the
+    read-only server stays light) and reads back the just-written run summary so
+    the caller gets headline metrics, not just an exit code. Heavy transcript
+    rows are stripped from the returned metrics.
+
+    Raises:
+        ValueError: if ``config`` does not point at an existing file.
+    """
+    config_path = Path(config).expanduser()
+    if not config_path.is_file():
+        raise ValueError(f"Config file not found: {config_path}")
+
+    # Imported here rather than at module load: the runner pulls in heavy
+    # dependencies (litellm, stages) that a read-only server never needs.
+    from assert_ai import runner
+
+    result = runner.run_pipeline_result(
+        config=str(config_path),
+        force_stages=force_stages,
+        overrides=overrides,
+        concurrency=concurrency,
+    )
+
+    payload: dict[str, Any] = {
+        "exit_code": result.exit_code,
+        "ok": result.exit_code == 0,
+        "suite": result.suite,
+        "run_id": result.run_id,
+        "run_root": result.run_root,
+        "metrics": None,
+    }
+    if result.run_root:
+        summary = results_api.load_run_summary(Path(result.run_root))
+        if summary is not None:
+            payload["metrics"] = strip_run_rows(summary)
+    return payload

@@ -16,6 +16,7 @@ import asyncio
 import json
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 from mcp.shared.memory import create_connected_server_and_client_session as connect
 
@@ -168,3 +169,84 @@ def test_missing_run_returns_tool_error(tmp_path: Path) -> None:
 
     result = asyncio.run(_run())
     assert result.isError
+
+
+def _seed_mock_eval(root: Path) -> Path:
+    """Write a judge-only config + inference set that runs without real models.
+
+    The judge stage is patched in the test, so no LLM is called. Mirrors the
+    end-to-end pattern in ``tests/test_run_metadata.py``.
+    """
+    results_root = root / "results"
+    suite_root = results_root / "suite-a"
+    suite_root.mkdir(parents=True, exist_ok=True)
+    inference_set = suite_root / "inference_set.jsonl"
+    inference_set.write_text('{"type":"prompt","test_case_id":"tc-1"}\n', encoding="utf-8")
+    (suite_root / "taxonomy.json").write_text("{}", encoding="utf-8")
+    cfg = root / "config.yaml"
+    cfg.write_text(
+        "\n".join(
+            [
+                "suite: suite-a",
+                "run: run-a",
+                f"results_dir: {results_root}",
+                "behavior:",
+                "  name: harmful_medical_advice",
+                "pipeline:",
+                "  judge:",
+                "    model:",
+                "      name: azure/gpt-5.4",
+                f"    inference_set_path: {inference_set}",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return cfg
+
+
+def test_run_eval_hidden_when_read_only(tmp_path: Path) -> None:
+    server = build_server(results_dir=tmp_path, read_only=True)
+    names = {tool.name for tool in asyncio.run(server.list_tools())}
+    assert "run_eval" not in names
+    assert EXPECTED_TOOLS <= names
+
+
+def test_run_eval_present_when_allowed(tmp_path: Path) -> None:
+    server = build_server(results_dir=tmp_path, read_only=False)
+    names = {tool.name for tool in asyncio.run(server.list_tools())}
+    assert "run_eval" in names
+
+
+def test_run_eval_executes_and_strips_rows(tmp_path: Path) -> None:
+    cfg = _seed_mock_eval(tmp_path)
+    results_root = tmp_path / "results"
+
+    async def fake_run_judge(**_: object) -> dict[str, str]:
+        run_root = results_root / "suite-a" / "run-a"
+        run_root.mkdir(parents=True, exist_ok=True)
+        rows = [
+            {"test_case_id": "tc-1", "target": "gpt-x", "judge_model": "j"},
+            {"test_case_id": "tc-2", "target": "gpt-x", "judge_model": "j"},
+        ]
+        scores = run_root / "scores.jsonl"
+        scores.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+        return {"scores_path": str(scores)}
+
+    async def _run() -> Any:
+        server = build_server(results_dir=results_root, read_only=False)
+        async with connect(server) as client:
+            await client.initialize()
+            return _structured(
+                await client.call_tool("run_eval", {"config": str(cfg)})
+            )
+
+    with patch("assert_ai.stages.judge.run_judge", new=fake_run_judge):
+        payload = asyncio.run(_run())
+
+    assert payload["ok"] is True
+    assert payload["exit_code"] == 0
+    assert payload["suite"] == "suite-a"
+    assert payload["run_id"] == "run-a"
+    assert payload["metrics"] is not None
+    assert "prompt_rows" not in payload["metrics"]
+    assert "scenario_rows" not in payload["metrics"]

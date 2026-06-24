@@ -20,6 +20,7 @@ Execution tools (``run_eval`` and friends) land in a later phase behind a
 from __future__ import annotations
 
 import argparse
+import asyncio
 import os
 from pathlib import Path
 from typing import Any, Sequence
@@ -109,7 +110,47 @@ def build_server(*, results_dir: Path, read_only: bool = True) -> FastMCP:
         """
         return _adapters.get_run(results_dir, suite, run)
 
+    if not read_only:
+        _register_execution_tools(mcp)
+
     return mcp
+
+
+def _register_execution_tools(mcp: FastMCP) -> None:
+    """Register tools that mutate state or spend model budget.
+
+    Gated behind ``--allow-run`` (``read_only=False``) so an operator can expose
+    a purely read-only server by default.
+    """
+
+    @mcp.tool()
+    async def run_eval(
+        config: str,
+        force_stages: list[str] | None = None,
+        overrides: list[str] | None = None,
+        concurrency: int | None = None,
+    ) -> dict[str, Any]:
+        """Run an ASSERT evaluation from a YAML config and return its outcome.
+
+        This spends model budget (the pipeline calls LLMs). Returns the exit
+        code, the suite/run id, and headline metrics read back from the run.
+
+        Args:
+            config: Path to a YAML pipeline config.
+            force_stages: Stage names to force-rerun (e.g. ``["judge"]``).
+            overrides: ``key=value`` config overrides (e.g. ``["test_set.sample_size=10"]``).
+            concurrency: Override inference/judge fan-out for this run.
+        """
+        # The runner drives async stages via its own ``loop.run_until_complete``;
+        # offload to a worker thread so it gets a clean event loop instead of
+        # colliding with the MCP server's running loop.
+        return await asyncio.to_thread(
+            _adapters.run_eval,
+            config,
+            force_stages=force_stages,
+            overrides=overrides,
+            concurrency=concurrency,
+        )
 
 
 def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
@@ -125,6 +166,14 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
             "(default: $ASSERT_RESULTS_DIR or ./artifacts/results)."
         ),
     )
+    parser.add_argument(
+        "--allow-run",
+        action="store_true",
+        help=(
+            "Enable execution tools (run_eval). These spend model budget; the "
+            "server is read-only by default."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -132,7 +181,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     """Console-script entry point: build the server and serve over stdio."""
     args = _parse_args(argv)
     results_dir = resolve_results_dir(args.results_dir)
-    server = build_server(results_dir=results_dir, read_only=True)
+    server = build_server(results_dir=results_dir, read_only=not args.allow_run)
     server.run()
 
 

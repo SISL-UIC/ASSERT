@@ -13,6 +13,7 @@ import socket
 import sys
 import time
 import warnings
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -582,15 +583,35 @@ def _log_run_headline(run_root: Path) -> None:
     )
 
 
-def run_pipeline(
+@dataclass
+class RunResult:
+    """Outcome of a pipeline run: the exit code and where artifacts landed.
+
+    ``run_pipeline`` returns just ``exit_code`` for backward compatibility;
+    callers that need the run identity (e.g. the MCP ``run_eval`` tool) call
+    ``run_pipeline_result`` to also receive the suite/run ids and absolute roots.
+    """
+
+    exit_code: int
+    run_id: str | None = None
+    suite: str | None = None
+    suite_root: str | None = None
+    run_root: str | None = None
+
+
+def run_pipeline_result(
     *,
     config: str,
     force_stages: list[str] | None = None,
     strict: bool = False,
     overrides: list[str] | None = None,
     concurrency: int | None = None,
-) -> int:
-    """Execute the configured stages sequentially and persist suite/run metadata."""
+) -> RunResult:
+    """Execute the configured stages sequentially and persist suite/run metadata.
+
+    Returns a :class:`RunResult` carrying the exit code plus the suite/run
+    identity and absolute artifact roots.
+    """
     # Suppress litellm's internal async logging warnings — they fire because
     # litellm creates async coroutines for logging callbacks that never get
     # awaited in our synchronous runner context. Harmless but alarming.
@@ -619,7 +640,7 @@ def run_pipeline(
         ctx["strict"] = strict
     except (ConfigError, ValueError) as exc:
         log.error(f"[config error] {exc}")
-        return 1
+        return RunResult(exit_code=1)
 
     # CLI --concurrency wins over the YAML-resolved value so a single run can be
     # widened or narrowed without editing the config. We mutate the live
@@ -642,7 +663,7 @@ def run_pipeline(
     if invalid_forced:
         joined = ", ".join(invalid_forced)
         log.error(f"[config error] --force-stage stage(s) not present in config: {joined}")
-        return 1
+        return RunResult(exit_code=1)
 
     # Cascade: forcing an upstream stage logically invalidates every stage
     # downstream of it. Without this, `--force-stage test_set` regenerates test_set
@@ -762,7 +783,7 @@ def run_pipeline(
         watchdog.start()
 
     try:
-        return _run_stages_inner(
+        exit_code = _run_stages_inner(
             ctx=ctx,
             stages_to_run=stages_to_run,
             artifact_plans=artifact_plans,
@@ -780,6 +801,36 @@ def run_pipeline(
             heartbeat.stop(write_final=True)
         if watchdog is not None:
             watchdog.stop()
+
+    return RunResult(
+        exit_code=exit_code,
+        run_id=(run_root.name if run_root is not None else None),
+        suite=suite_root.name,
+        suite_root=str(suite_root),
+        run_root=(str(run_root) if run_root is not None else None),
+    )
+
+
+def run_pipeline(
+    *,
+    config: str,
+    force_stages: list[str] | None = None,
+    strict: bool = False,
+    overrides: list[str] | None = None,
+    concurrency: int | None = None,
+) -> int:
+    """Backward-compatible wrapper around :func:`run_pipeline_result`.
+
+    Returns just the process exit code, preserving the original signature and
+    return type relied on by the CLI and existing callers.
+    """
+    return run_pipeline_result(
+        config=config,
+        force_stages=force_stages,
+        strict=strict,
+        overrides=overrides,
+        concurrency=concurrency,
+    ).exit_code
 
 
 def _run_stages_inner(
