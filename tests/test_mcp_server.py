@@ -33,6 +33,7 @@ EXPECTED_TOOLS = {
     "list_runs",
     "get_run",
     "compare_runs",
+    "get_failures",
 }
 
 
@@ -411,3 +412,31 @@ def test_demo_seed_produces_a_real_regression(tmp_path: Path) -> None:
     assert policy["last"] is not None and policy["last"] > 0.5
     assert policy["delta"] is not None and policy["delta"] > 0.5
     assert result["behavior_deltas"]  # per-behavior breakdown is populated
+
+
+def test_get_failures_lists_flagged_cases(tmp_path: Path) -> None:
+    seed_mod = _load_demo_seed_module()
+    results_dir = tmp_path / "results"
+    seed_mod.seed(results_dir)
+
+    async def _run() -> Any:
+        server = build_server(results_dir=results_dir, read_only=True)
+        async with connect(server) as client:
+            await client.initialize()
+            return _structured(
+                await client.call_tool(
+                    "get_failures",
+                    {
+                        "suite": seed_mod.SUITE_ID,
+                        "run": "regressed",
+                        "dimension": "policy_violation",
+                    },
+                )
+            )
+
+    result = asyncio.run(_run())
+    assert result["dimension"] == "policy_violation"
+    assert result["count"] == 4
+    ids = {failure["test_case_id"] for failure in result["failures"]}
+    assert ids == {"outside-01", "outside-02", "outside-03", "partial-01"}
+    assert all(failure["justification"] for failure in result["failures"])

@@ -56,6 +56,7 @@ assert-ai-mcp --results-dir artifacts/results --allow-run
 | `list_runs(suite)` | List runs in a suite with per-run metrics. |
 | `get_run(suite, run)` | One run's metrics and status (transcripts omitted). |
 | `compare_runs(suite, run_a, run_b, metric?)` | Per-run metrics, first-vs-last rate deltas, and per-behavior deltas. |
+| `get_failures(suite, run, dimension?, limit?)` | The test cases a run flagged on a dimension, each with the judge's reasoning. |
 
 **Tools (execution, require `--allow-run`):**
 
@@ -124,10 +125,11 @@ Then connect a client and walk through the story:
 
 1. **"List my evaluation suites."** → `list_suites` shows `refund-policy-demo` with two runs.
 2. **"Did anything regress between baseline and the latest run?"** → `compare_runs(suite="refund-policy-demo", run_a="baseline", run_b="regressed")` returns a `policy_violation` rate jump from **0% to 67%**, with `outside_policy` and `partial_eligibility` each up 100%.
-3. **"Show me the worst failing transcript."** → read resource
+3. **"Which cases failed, and why?"** → `get_failures(suite="refund-policy-demo", run="regressed")` lists the four flagged cases with the judge's reasoning.
+4. **"Show me the worst failing transcript."** → read resource
    `assert://results/refund-policy-demo/regressed/transcript/outside-01` — the agent
    approves a 4-month-old refund the policy forbids.
-4. **"Which judge preset covers grounding?"** → `show_preset("grounding")`.
+5. **"Which judge preset covers grounding?"** → `show_preset("grounding")`.
 
 To demonstrate a live run instead of seeded data, start the server with
 `--allow-run` and ask the agent to `run_eval` a small config (use a mock or fast

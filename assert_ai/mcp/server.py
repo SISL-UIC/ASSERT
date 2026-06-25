@@ -132,6 +132,24 @@ def build_server(*, results_dir: Path, read_only: bool = True) -> FastMCP:
         """
         return _adapters.compare_runs(results_dir, suite, run_a, run_b, metric=metric)
 
+    @mcp.tool()
+    def get_failures(
+        suite: str,
+        run: str,
+        dimension: str = "policy_violation",
+        limit: int = 10,
+    ) -> dict[str, Any]:
+        """List the test cases a run flagged, with the judge's reasoning.
+
+        Args:
+            suite: Suite id.
+            run: Run id.
+            dimension: Judge dimension to filter on (e.g. ``policy_violation``,
+                ``overrefusal``).
+            limit: Maximum number of failing cases to return.
+        """
+        return _adapters.get_failures(results_dir, suite, run, dimension, limit)
+
     @mcp.resource(
         "assert://results/{suite}/{run}/transcript/{case_id}",
         mime_type="application/json",

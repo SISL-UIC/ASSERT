@@ -87,6 +87,19 @@ def compare_runs(
     )
 
 
+def get_failures(
+    results_dir: Path,
+    suite: str,
+    run: str,
+    dimension: str = "policy_violation",
+    limit: int = 10,
+) -> dict[str, Any]:
+    """Return a run's flagged test cases for ``dimension`` with judge rationale."""
+    return results_api.collect_failures(
+        results_dir, suite, run, dimension=dimension, limit=limit
+    )
+
+
 def get_transcript(
     results_dir: Path, suite: str, run: str, case_id: str
 ) -> dict[str, Any]:

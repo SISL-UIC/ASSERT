@@ -405,3 +405,56 @@ def compute_run_comparison(
         "headline_deltas": headline_deltas,
         "behavior_deltas": behavior_deltas,
     }
+
+
+def collect_failures(
+    results_dir: Path,
+    suite: str,
+    run: str,
+    *,
+    dimension: str = "policy_violation",
+    limit: int = 10,
+) -> dict[str, Any]:
+    """Return the test cases a run flagged on ``dimension``, with judge rationale.
+
+    Scans the run's scored rows and keeps those where ``dimension`` is a flagged
+    (truthy) verdict, attaching the judge's per-dimension justification. Pure and
+    reusable; raises ``ValueError`` if the run is missing or unreadable.
+    """
+    summary = load_run_summary(results_dir / suite / run)
+    if summary is None:
+        raise ValueError(f"Run not found or unreadable: {suite}/{run}")
+
+    rows = list(summary.get("prompt_rows") or []) + list(summary.get("scenario_rows") or [])
+    failures: list[dict[str, Any]] = []
+    for row in rows:
+        if infer_judge_status(row) != "ok":
+            continue
+        value = get_verdict_dimension(row.get("verdict"), dimension)
+        if not is_valid_event_flag(value) or not bool(value):
+            continue
+        verdict = row.get("verdict") if isinstance(row.get("verdict"), dict) else {}
+        justifications = verdict.get("dimension_justifications")
+        justification = None
+        if isinstance(justifications, dict):
+            justification = justifications.get(dimension)
+        justification = justification or verdict.get("justification")
+        failures.append(
+            {
+                "test_case_id": row.get("test_case_id"),
+                "behavior": row_behavior(row),
+                "dimension": dimension,
+                "target": row.get("target"),
+                "justification": justification,
+            }
+        )
+
+    if limit >= 0:
+        failures = failures[:limit]
+    return {
+        "suite": suite,
+        "run": run,
+        "dimension": dimension,
+        "count": len(failures),
+        "failures": failures,
+    }
