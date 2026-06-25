@@ -23,14 +23,18 @@ import argparse
 import asyncio
 import json
 import os
+import time
 from pathlib import Path
 from typing import Any, Sequence
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Context, FastMCP
 
 from assert_ai.mcp import _adapters
 
 SERVER_NAME = "assert"
+
+# How often run_eval emits an elapsed-time heartbeat while a run is in flight.
+_PROGRESS_INTERVAL_S = 5.0
 
 INSTRUCTIONS = (
     "ASSERT evaluation server. Use these tools to browse the built-in behavior "
@@ -187,6 +191,16 @@ def build_server(*, results_dir: Path, read_only: bool = True) -> FastMCP:
     return mcp
 
 
+async def _notify(ctx: Context | None, coro: Any) -> None:
+    """Await a best-effort progress/log notification; never break the run."""
+    if ctx is None or coro is None:
+        return
+    try:
+        await coro
+    except Exception:  # noqa: BLE001 - progress notifications are advisory only
+        pass
+
+
 def _register_execution_tools(mcp: FastMCP) -> None:
     """Register tools that mutate state or spend model budget.
 
@@ -200,11 +214,14 @@ def _register_execution_tools(mcp: FastMCP) -> None:
         force_stages: list[str] | None = None,
         overrides: list[str] | None = None,
         concurrency: int | None = None,
+        ctx: Context | None = None,
     ) -> dict[str, Any]:
         """Run an ASSERT evaluation from a YAML config and return its outcome.
 
         This spends model budget (the pipeline calls LLMs). Returns the exit
         code, the suite/run id, and headline metrics read back from the run.
+        While the run is in flight, periodic progress notifications report
+        elapsed time so the client knows it is still working.
 
         Args:
             config: Path to a YAML pipeline config.
@@ -215,13 +232,41 @@ def _register_execution_tools(mcp: FastMCP) -> None:
         # The runner drives async stages via its own ``loop.run_until_complete``;
         # offload to a worker thread so it gets a clean event loop instead of
         # colliding with the MCP server's running loop.
-        return await asyncio.to_thread(
-            _adapters.run_eval,
-            config,
-            force_stages=force_stages,
-            overrides=overrides,
-            concurrency=concurrency,
+        task = asyncio.create_task(
+            asyncio.to_thread(
+                _adapters.run_eval,
+                config,
+                force_stages=force_stages,
+                overrides=overrides,
+                concurrency=concurrency,
+            )
         )
+        await _notify(ctx, ctx.info(f"Starting evaluation from {config} ...") if ctx else None)
+        started = time.monotonic()
+        # asyncio.wait returns as soon as the run finishes, so fast runs add no
+        # latency; long runs emit an elapsed-time heartbeat every interval.
+        while True:
+            done, _ = await asyncio.wait({task}, timeout=_PROGRESS_INTERVAL_S)
+            if task in done:
+                break
+            elapsed = int(time.monotonic() - started)
+            await _notify(
+                ctx,
+                ctx.report_progress(
+                    progress=float(elapsed), total=None, message=f"Running… {elapsed}s elapsed"
+                )
+                if ctx
+                else None,
+            )
+        result = task.result()
+        elapsed = int(time.monotonic() - started)
+        await _notify(
+            ctx,
+            ctx.info(f"Evaluation finished (exit {result['exit_code']}) in {elapsed}s.")
+            if ctx
+            else None,
+        )
+        return result
 
 
 def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:

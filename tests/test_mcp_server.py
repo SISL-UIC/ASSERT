@@ -466,3 +466,40 @@ def test_validate_config_accepts_good_and_rejects_bad(tmp_path: Path) -> None:
     bad = asyncio.run(_validate(bad_cfg))
     assert bad["valid"] is False
     assert bad["error"]
+
+
+def test_run_eval_reports_progress(tmp_path: Path, monkeypatch: Any) -> None:
+    import assert_ai.mcp.server as server_mod
+
+    cfg = _seed_mock_eval(tmp_path)
+    results_root = tmp_path / "results"
+    monkeypatch.setattr(server_mod, "_PROGRESS_INTERVAL_S", 0.05)
+
+    async def fake_run_judge(**_: object) -> dict[str, str]:
+        run_root = results_root / "suite-a" / "run-a"
+        run_root.mkdir(parents=True, exist_ok=True)
+        await asyncio.sleep(0.25)  # outlast a few heartbeat intervals
+        scores = run_root / "scores.jsonl"
+        scores.write_text(
+            '{"test_case_id":"tc-1","target":"t","judge_model":"j"}\n', encoding="utf-8"
+        )
+        return {"scores_path": str(scores)}
+
+    progress_events: list[tuple[float, float | None, str | None]] = []
+
+    async def on_progress(progress: float, total: float | None, message: str | None) -> None:
+        progress_events.append((progress, total, message))
+
+    async def _run() -> Any:
+        server = build_server(results_dir=results_root, read_only=False)
+        async with connect(server) as client:
+            await client.initialize()
+            return await client.call_tool(
+                "run_eval", {"config": str(cfg)}, progress_callback=on_progress
+            )
+
+    with patch("assert_ai.stages.judge.run_judge", new=fake_run_judge):
+        result = asyncio.run(_run())
+
+    assert not result.isError
+    assert progress_events  # at least one elapsed-time heartbeat fired

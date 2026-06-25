@@ -63,7 +63,7 @@ assert-ai-mcp --results-dir artifacts/results --allow-run
 
 | Tool | Purpose |
 |---|---|
-| `run_eval(config, force_stages?, overrides?, concurrency?)` | Run a pipeline from a YAML config; returns the run id and headline metrics. |
+| `run_eval(config, force_stages?, overrides?, concurrency?)` | Run a pipeline from a YAML config; returns the run id and headline metrics. Emits elapsed-time progress notifications while running. |
 
 **Resources** (pulled into the agent's context on demand):
 
