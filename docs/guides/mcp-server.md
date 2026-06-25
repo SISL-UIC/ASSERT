@@ -57,6 +57,7 @@ assert-ai-mcp --results-dir artifacts/results --allow-run
 | `get_run(suite, run)` | One run's metrics and status (transcripts omitted). |
 | `compare_runs(suite, run_a, run_b, metric?)` | Per-run metrics, first-vs-last rate deltas, and per-behavior deltas. |
 | `get_failures(suite, run, dimension?, limit?)` | The test cases a run flagged on a dimension, each with the judge's reasoning. |
+| `validate_config(config)` | Validate a YAML config (no model calls) before running it. |
 
 **Tools (execution, require `--allow-run`):**
 

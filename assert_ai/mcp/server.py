@@ -150,6 +150,18 @@ def build_server(*, results_dir: Path, read_only: bool = True) -> FastMCP:
         """
         return _adapters.get_failures(results_dir, suite, run, dimension, limit)
 
+    @mcp.tool()
+    def validate_config(config: str) -> dict[str, Any]:
+        """Validate a YAML config without running it (no model calls).
+
+        Returns ``valid: true`` with a stage summary, or ``valid: false`` with the
+        validation error — useful before calling ``run_eval``.
+
+        Args:
+            config: Path to a YAML pipeline config.
+        """
+        return _adapters.validate_config(config)
+
     @mcp.resource(
         "assert://results/{suite}/{run}/transcript/{case_id}",
         mime_type="application/json",

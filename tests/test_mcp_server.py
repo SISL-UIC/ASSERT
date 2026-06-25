@@ -34,6 +34,7 @@ EXPECTED_TOOLS = {
     "get_run",
     "compare_runs",
     "get_failures",
+    "validate_config",
 }
 
 
@@ -440,3 +441,28 @@ def test_get_failures_lists_flagged_cases(tmp_path: Path) -> None:
     ids = {failure["test_case_id"] for failure in result["failures"]}
     assert ids == {"outside-01", "outside-02", "outside-03", "partial-01"}
     assert all(failure["justification"] for failure in result["failures"])
+
+
+def test_validate_config_accepts_good_and_rejects_bad(tmp_path: Path) -> None:
+    good_cfg = _seed_mock_eval(tmp_path)
+    bad_cfg = tmp_path / "bad.yaml"
+    bad_cfg.write_text(
+        "suite: s\nbehavior:\n  name: b\npipeline:\n  inference:\n    target: {}\n",
+        encoding="utf-8",
+    )
+
+    async def _validate(cfg: Path) -> Any:
+        server = build_server(results_dir=tmp_path, read_only=True)
+        async with connect(server) as client:
+            await client.initialize()
+            return _structured(
+                await client.call_tool("validate_config", {"config": str(cfg)})
+            )
+
+    ok = asyncio.run(_validate(good_cfg))
+    assert ok["valid"] is True
+    assert "judge" in ok["stages"]
+
+    bad = asyncio.run(_validate(bad_cfg))
+    assert bad["valid"] is False
+    assert bad["error"]

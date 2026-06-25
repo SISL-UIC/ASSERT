@@ -100,6 +100,42 @@ def get_failures(
     )
 
 
+def validate_config(config: str) -> dict[str, Any]:
+    """Validate a YAML config without running it.
+
+    Loads and resolves the config exactly as a run would (``load_config`` +
+    ``load_runtime_context``) but executes no stages and spends no budget.
+    Returns ``{"valid": True, ...}`` with a small summary, or
+    ``{"valid": False, "error": ...}`` with the validation message.
+
+    Raises:
+        ValueError: if ``config`` does not point at an existing file.
+    """
+    config_path = Path(config).expanduser()
+    if not config_path.is_file():
+        raise ValueError(f"Config file not found: {config_path}")
+
+    # Imported lazily: pulls in the config/stages machinery only when needed.
+    from assert_ai.config import ConfigError, load_config, load_runtime_context
+    from assert_ai.stages import STAGES
+
+    resolved = config_path.resolve()
+    try:
+        raw = load_config(resolved)
+        ctx = load_runtime_context(raw, resolved, stage_modules=STAGES)
+    except (ConfigError, ValueError) as exc:
+        return {"valid": False, "config": str(resolved), "error": str(exc)}
+
+    suite_root = ctx.get("suite_root")
+    return {
+        "valid": True,
+        "config": str(resolved),
+        "suite": Path(suite_root).name if suite_root else None,
+        "run_id": ctx.get("run_id"),
+        "stages": [name for name, _ in ctx.get("stages", [])],
+    }
+
+
 def get_transcript(
     results_dir: Path, suite: str, run: str, case_id: str
 ) -> dict[str, Any]:
