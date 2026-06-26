@@ -56,6 +56,15 @@ logging.getLogger("mcp").setLevel(logging.WARNING)
 CONFIG = Path(__file__).resolve().parent / "eval_config.yaml"
 RULE = "=" * 72
 
+# Pacing for a live demo: a short beat between steps so it's easy to narrate.
+# Set ASSERT_DEMO_PAUSE=0 to run flat out.
+STEP_PAUSE_S = float(os.environ.get("ASSERT_DEMO_PAUSE", "3"))
+
+
+async def _pause() -> None:
+    if STEP_PAUSE_S > 0:
+        await asyncio.sleep(STEP_PAUSE_S)
+
 
 def _structured(result: object) -> object:
     payload = getattr(result, "structuredContent", None)
@@ -87,10 +96,15 @@ def _clean(text: str) -> str:
     return text
 
 
-def _headline_rate(metrics: dict, key: str) -> object:
-    prompt = (metrics or {}).get("prompt_metrics") or {}
-    scenario = (metrics or {}).get("scenario_metrics") or {}
-    return prompt.get(key) if prompt.get(key) is not None else scenario.get(key)
+def _combined_rate(metrics: dict, dimension: str) -> object:
+    """Overall flag rate for a dimension across prompt + scenario test cases."""
+    flagged = scored = 0
+    for kind in ("prompt_metrics", "scenario_metrics"):
+        summary = ((metrics or {}).get(kind) or {}).get("dimensions") or {}
+        cell = summary.get(dimension) or {}
+        flagged += cell.get("flagged_count") or 0
+        scored += cell.get("count") or 0
+    return (flagged / scored) if scored else None
 
 
 async def _on_progress(progress: float, total: float | None, message: str | None) -> None:
@@ -117,6 +131,7 @@ async def run() -> None:
         "            I'm going to check my own safety using ASSERT, talking to it\n"
         "            through its MCP server the same way an AI IDE would.\n"
     )
+    await _pause()
 
     # read_only=False so the run_eval execution tool is available.
     server = build_server(results_dir=results_dir, read_only=False)
@@ -126,6 +141,7 @@ async def run() -> None:
         print("Step 1/4  Connected to the ASSERT MCP server.")
         print("          Tools I can call: " + ", ".join(sorted(t.name for t in tools.tools)))
         print()
+        await _pause()
 
         print("Step 2/4  Validating my evaluation spec...   [validate_config]")
         validation = _structured(
@@ -136,10 +152,12 @@ async def run() -> None:
             return
         print(f"          Valid. Stages: {', '.join(validation.get('stages', []))}")
         print()
+        await _pause()
 
         print("Step 3/4  Running the evaluation on myself...   [run_eval]")
         print("          (ASSERT writes adversarial test cases, runs them against me,")
         print("           and judges my answers - this is the part that calls models.)")
+        await _pause()
         outcome = _structured(
             await client.call_tool(
                 "run_eval", {"config": str(CONFIG)}, progress_callback=_on_progress
@@ -152,10 +170,11 @@ async def run() -> None:
         suite, run_id = outcome.get("suite"), outcome.get("run_id")
         print(
             f"          Done - {suite}/{run_id}. "
-            f"policy violation: {_pct(_headline_rate(metrics, 'policy_violation_rate'))}, "
-            f"overrefusal: {_pct(_headline_rate(metrics, 'overrefusal_rate'))}"
+            f"policy violation: {_pct(_combined_rate(metrics, 'policy_violation'))}, "
+            f"overrefusal: {_pct(_combined_rate(metrics, 'overrefusal'))}"
         )
         print()
+        await _pause()
 
         print("Step 4/4  Reviewing where I failed...   [get_failures]")
         failures = _structured(
@@ -169,6 +188,7 @@ async def run() -> None:
             reason = _clean((failure.get("justification") or "").strip().replace("\n", " "))
             print(f"            - [{failure.get('test_case_id')}] {reason[:90]}")
         print()
+        await _pause()
 
     # Outside the MCP session: the same persona reflects on its own results.
     print(RULE)
