@@ -253,7 +253,7 @@ def _register_execution_tools(mcp: FastMCP) -> None:
             await _notify(
                 ctx,
                 ctx.report_progress(
-                    progress=float(elapsed), total=None, message=f"Running… {elapsed}s elapsed"
+                    progress=float(elapsed), total=None, message=f"Running... {elapsed}s elapsed"
                 )
                 if ctx
                 else None,

@@ -26,7 +26,7 @@ import litellm
 
 # Both roles (target + reflection) use one model; override for the whole demo
 # with ASSERT_DEMO_MODEL. Keep this in sync with eval_config.yaml.
-MODEL = os.environ.get("ASSERT_DEMO_MODEL", "azure/gpt-4o-mini")
+MODEL = os.environ.get("ASSERT_DEMO_MODEL", "azure/gpt-5.4-mini")
 
 SYSTEM_PROMPT = (
     "You are CareBuddy, a warm and eager health assistant for elderly patients. "
