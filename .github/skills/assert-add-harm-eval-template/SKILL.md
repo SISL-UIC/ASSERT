@@ -1,5 +1,5 @@
 ---
-name: add-harm-eval-template
+name: assert-add-harm-eval-template
 description: 'Generate a complete ASSERT eval_config.yaml evaluation template from a named harm. Use when the user wants to scaffold or create an ASSERT evaluation config for a specific harm or behavior (e.g., child_safety, imminent_crisis_management, violence, sexual_content, prompt_injection), build a full pipeline (systematize, test_set, inference, judge), research relevant behavior categories, test-set dimensions, and judge dimensions for a harm, or tune generation knobs like behavior_category_count and prompt/scenario sample sizes. Produces a customer-safe YAML like examples/azure_managed_identity/eval_config.yaml.'
 argument-hint: '<harm_name> [optional behavior description] [optional context]'
 ---
