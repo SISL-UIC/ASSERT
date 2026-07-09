@@ -99,7 +99,7 @@ assert-ai results status health-assistant-v1 demo-1
 <details>
 <summary><strong>Develop from source</strong> (contributing, or running the repo examples directly)</summary>
 
-Clone the repo and install editable with the extras you need. The bundled `--example` configs above cover the common cases without a clone.
+Clone the repo and install editable with the extras you need. The bundled `--example` configs above cover the common cases without a clone. **Want a feature or fix that just landed on `main` but hasn't reached PyPI yet?** This is also the path for that — `pip install assert-ai` always trails `main` between releases.
 
 macOS / Linux:
 
