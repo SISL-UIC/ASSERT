@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ASSERT × ACS — AIEWF 2026 (18 min)</title>
+<style>
+  :root{
+    --bg:#0B0F1A; --ink:#F8FAFC; --muted:#94A3B8;
+    --cyan:#38BDF8; --emerald:#34D399; --red:#F87171; --card:#111827;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    background:var(--bg);color:var(--ink);
+    font-family:"Segoe UI",system-ui,-apple-system,sans-serif;
+    display:flex;align-items:center;justify-content:center;overflow:hidden;
+  }
+  .stage{width:100vw;height:100vh;position:relative}
+  .slide{
+    position:absolute;inset:0;display:none;
+    flex-direction:column;justify-content:center;
+    padding:6vh 8vw;gap:2.2vh;
+  }
+  .slide.active{display:flex;animation:fade .25s ease}
+  @keyframes fade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+  .kicker{color:var(--cyan);font-size:1.4rem;letter-spacing:.08em;text-transform:uppercase;font-weight:600}
+  h1{font-size:clamp(2.2rem,5.5vw,4.2rem);line-height:1.05;font-weight:800}
+  h2{font-size:clamp(1.8rem,4vw,3rem);line-height:1.1;font-weight:800}
+  .sub{color:var(--muted);font-size:clamp(1.1rem,1.8vw,1.5rem)}
+  .center{align-items:center;text-align:center}
+  img.chart{max-height:66vh;max-width:88vw;object-fit:contain;align-self:center;
+    border-radius:12px;box-shadow:0 8px 40px rgba(0,0,0,.5)}
+  .stat-row{display:flex;gap:3vw;flex-wrap:wrap;margin-top:1vh}
+  .stat{background:var(--card);border:1px solid #1f2937;border-radius:14px;padding:2.2vh 2vw;flex:1;min-width:220px}
+  .stat .n{font-size:clamp(2.4rem,5vw,3.6rem);font-weight:800;color:var(--cyan)}
+  .stat .l{color:var(--muted);font-size:1.15rem;margin-top:.4rem}
+  .fails{display:grid;grid-template-columns:repeat(2,1fr);gap:2vh 2.5vw;margin-top:1vh}
+  .fail{background:var(--card);border:1px solid #1f2937;border-left:4px solid var(--red);border-radius:12px;padding:2vh 1.8vw}
+  .fail .idx{color:var(--red);font-weight:800;font-size:1.2rem}
+  .fail .t{font-weight:700;font-size:1.35rem;margin:.3rem 0}
+  .fail .d{color:var(--muted);font-size:1.1rem}
+  .loop{display:flex;gap:1.2vw;flex-wrap:wrap;justify-content:center;margin-top:1vh}
+  .chip{background:var(--card);border:1px solid #1f2937;border-radius:999px;padding:1.1vh 1.6vw;font-size:1.2rem}
+  .chip.assert{border-color:var(--cyan);color:var(--cyan)}
+  .chip.acs{border-color:var(--emerald);color:var(--emerald)}
+  .announce{display:flex;gap:4vw;flex-wrap:wrap;justify-content:center;margin-top:2vh}
+  .brand{background:var(--card);border:1px solid #1f2937;border-radius:16px;padding:3vh 3vw;flex:1;min-width:300px}
+  .brand.assert{border-top:4px solid var(--cyan)}
+  .brand.acs{border-top:4px solid var(--emerald)}
+  .brand .big{font-size:2.4rem;font-weight:800}
+  .brand.assert .big{color:var(--cyan)} .brand.acs .big{color:var(--emerald)}
+  .brand .exp{color:var(--muted);font-size:1.15rem;margin:.6rem 0}
+  .brand .link{font-family:ui-monospace,monospace;font-size:1.3rem;margin-top:.8rem}
+  .hud{position:fixed;bottom:2.5vh;right:3vw;color:var(--muted);font-size:1rem;
+    background:rgba(17,24,39,.8);padding:.5rem 1rem;border-radius:999px;border:1px solid #1f2937}
+  .hint{position:fixed;bottom:2.5vh;left:3vw;color:var(--muted);font-size:.95rem}
+  .dots{position:fixed;top:2.5vh;left:50%;transform:translateX(-50%);display:flex;gap:.6rem}
+  .dot{width:9px;height:9px;border-radius:50%;background:#334155;cursor:pointer}
+  .dot.on{background:var(--cyan)}
+  a{color:var(--cyan)}
+</style>
+</head>
+<body>
+<div class="stage" id="stage">
+
+  <!-- 0 · Title -->
+  <section class="slide center active">
+    <div class="kicker">AIEWF 2026</div>
+    <h1><code>min<sub>control</sub> failure(YOUR&nbsp;agent)</code></h1>
+    <div class="sub">eval&nbsp;+&nbsp;control&nbsp;→&nbsp;optimize</div>
+    <div class="sub" style="margin-top:3vh">Chang Liu · Senior Product Manager, Microsoft</div>
+  </section>
+
+  <!-- 1 · Top agent risks -->
+  <section class="slide">
+    <div class="kicker">Why trust is the barrier</div>
+    <h2>Top agent risks</h2>
+    <div class="stat-row">
+      <div class="stat"><div class="n">60%</div><div class="l">AI agents access privileged data</div></div>
+      <div class="stat"><div class="n">57%</div><div class="l">Share sensitive data without authorization</div></div>
+      <div class="stat"><div class="n">54%</div><div class="l">Distribute inappropriate information</div></div>
+    </div>
+    <div class="sub" style="margin-top:2vh">Source: SailPoint</div>
+  </section>
+
+  <!-- 2 · The agent -->
+  <section class="slide center">
+    <div class="kicker">Worked example</div>
+    <h1>A Bank Manager Agent</h1>
+    <div class="sub">Checks balances &amp; history · prepares, approves &amp; executes transfers · freezes flagged accounts — six tools.</div>
+    <div class="sub" style="margin-top:2vh">The safety bar is <b>company policy</b>, not generic toxicity.</div>
+  </section>
+
+  <!-- 3 · Failure modes -->
+  <section class="slide">
+    <div class="kicker">Real failure modes in our bank manager agent</div>
+    <h2>What can possibly go wrong?</h2>
+    <div class="fails">
+      <div class="fail"><div class="idx">1</div><div class="t">Instruction &amp; control failure</div><div class="d">Prompt injection unlocks admin mode</div></div>
+      <div class="fail"><div class="idx">2</div><div class="t">Information integrity &amp; leakage</div><div class="d">Fabricated bank policy</div></div>
+      <div class="fail"><div class="idx">3</div><div class="t">Tool / action misuse</div><div class="d">Transfer executed without approval</div></div>
+      <div class="fail"><div class="idx">4</div><div class="t">System-level &amp; emergent risk</div><div class="d">Over-refusal blocks legitimate work</div></div>
+    </div>
+  </section>
+
+  <!-- 4 · Loop -->
+  <section class="slide center">
+    <div class="kicker">The inner loop that powers the outer loop</div>
+    <h2>Evaluate → Control → Optimize</h2>
+    <img class="chart" src="assets/loop_diagram.png" alt="Continuous loop: eval with ASSERT, control with ACS" />
+    <div class="loop">
+      <span class="chip assert">Eval with ASSERT</span>
+      <span class="chip acs">Control with ACS</span>
+      <span class="chip">Spec → Build → Test → CI/CD → Monitor</span>
+    </div>
+  </section>
+
+  <!-- 5 · Pareto -->
+  <section class="slide">
+    <div class="kicker">Optimize with an agent control plane</div>
+    <h2>Pareto: fewer violations <i>and</i> less over-refusal</h2>
+    <img class="chart" src="assets/pareto.png" alt="Pareto frontier: unguarded vs defensive prompt vs control plane" />
+  </section>
+
+  <!-- 6 · Policy as code -->
+  <section class="slide">
+    <div class="kicker">Generalization</div>
+    <h2>Policy as code — one rule, every domain</h2>
+    <img class="chart" src="assets/generalization_leak.png" alt="Policy-as-code holds across four domains it was never explicitly written for" />
+  </section>
+
+  <!-- 7 · Announcement -->
+  <section class="slide center">
+    <div class="kicker">Open standards for evaluating &amp; controlling AI agents</div>
+    <div class="announce">
+      <div class="brand assert">
+        <div class="big">ASSERT</div>
+        <div class="exp"><b>A</b>daptive <b>S</b>pec-driven <b>S</b>coring for <b>E</b>valuations and <b>R</b>egression <b>T</b>esting</div>
+        <div class="link">aka.ms/assert</div>
+      </div>
+      <div class="brand acs">
+        <div class="big">ACS</div>
+        <div class="exp"><b>A</b>gent <b>C</b>ontrol <b>S</b>pecification</div>
+        <div class="link">aka.ms/agtacs</div>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<div class="dots" id="dots"></div>
+<div class="hud" id="hud">1 / 8</div>
+<div class="hint">← / → or Space to navigate · F for fullscreen</div>
+
+<script>
+  const slides = [...document.querySelectorAll('.slide')];
+  const hud = document.getElementById('hud');
+  const dotsWrap = document.getElementById('dots');
+  let i = 0;
+  slides.forEach((_, n) => {
+    const d = document.createElement('div');
+    d.className = 'dot' + (n === 0 ? ' on' : '');
+    d.onclick = () => go(n);
+    dotsWrap.appendChild(d);
+  });
+  const dots = [...document.querySelectorAll('.dot')];
+  function go(n){
+    i = Math.max(0, Math.min(slides.length - 1, n));
+    slides.forEach((s, k) => s.classList.toggle('active', k === i));
+    dots.forEach((d, k) => d.classList.toggle('on', k === i));
+    hud.textContent = (i + 1) + ' / ' + slides.length;
+  }
+  document.addEventListener('keydown', e => {
+    if (['ArrowRight',' ','PageDown','ArrowDown'].includes(e.key)) { e.preventDefault(); go(i + 1); }
+    else if (['ArrowLeft','PageUp','ArrowUp'].includes(e.key)) { e.preventDefault(); go(i - 1); }
+    else if (e.key === 'Home') go(0);
+    else if (e.key === 'End') go(slides.length - 1);
+    else if (e.key.toLowerCase() === 'f') {
+      if (!document.fullscreenElement) document.documentElement.requestFullscreen();
+      else document.exitFullscreen();
+    }
+  });
+  // click right half = next, left half = prev
+  document.getElementById('stage').addEventListener('click', e => {
+    go(e.clientX > window.innerWidth / 2 ? i + 1 : i - 1);
+  });
+</script>
+</body>
+</html>
