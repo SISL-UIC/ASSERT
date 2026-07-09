@@ -445,6 +445,36 @@ def _maybe_inject_azure_aad_token(model: str, payload: dict[str, Any]) -> None:
         payload["azure_ad_token_provider"] = provider
 
 
+def _maybe_inject_azure_responses_api_version(model: str, payload: dict[str, Any]) -> None:
+    """Forward ``AZURE_API_VERSION`` onto ``azure/*`` Responses API payloads.
+
+    LiteLLM's Responses path does not read ``AZURE_API_VERSION`` from the
+    environment the way its Chat Completions path does. Left to its own
+    default it uses ``AZURE_DEFAULT_RESPONSES_API_VERSION`` — literally
+    ``"preview"`` — which routes the request to the newer
+    ``/openai/v1/responses`` surface. Azure OpenAI resources that only
+    serve the classic ``/openai/responses?api-version=<dated>`` endpoint
+    reject the ``/openai/v1/`` surface with a 401 ("wrong API endpoint"),
+    so ``web_search`` fails even though the same identity works for Chat
+    Completions.
+
+    Passing an explicit dated ``api_version`` keeps LiteLLM on the classic
+    ``/openai/responses`` route — matching the api-version the Chat path
+    already uses. No-op unless the model is ``azure/*`` and
+    ``AZURE_API_VERSION`` is set; ``azure_ai/*`` (Foundry) uses a different
+    route and is intentionally excluded. Callers must invoke this *before*
+    applying ``extra_kwargs`` so an explicit user-supplied ``api_version``
+    still wins.
+    """
+    if _model_family(model) != "azure":
+        return
+    if "api_version" in payload:
+        return
+    api_version = (os.environ.get("AZURE_API_VERSION") or "").strip()
+    if api_version:
+        payload["api_version"] = api_version
+
+
 def _supports_web_search_preview(model: str) -> bool:
     """Whether this model can use the Responses API web_search_preview tool.
 
@@ -676,6 +706,7 @@ def _build_responses_payload(
     if resolved_options.reasoning_effort is not None:
         payload["reasoning_effort"] = resolved_options.reasoning_effort
     _maybe_inject_azure_aad_token(model, payload)
+    _maybe_inject_azure_responses_api_version(model, payload)
     payload.update(resolved_options.extra_kwargs)
     return payload
 
