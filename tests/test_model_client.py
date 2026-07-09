@@ -772,6 +772,7 @@ class WebSearchFallbackDegradationTest(unittest.IsolatedAsyncioTestCase):
         }
 
         with patch.object(model_client, "_get_litellm_module", return_value=fake_litellm), \
+                patch.object(model_client.azure_auth, "get_azure_token_provider", return_value=lambda: "test-token"), \
                 self.assertLogs(model_client.log, level="WARNING") as cm:
             response = await model_client.generate_structured(
                 "azure/gpt-5.4",
@@ -964,6 +965,7 @@ class AzureResponsesApiVersionInjectionTest(unittest.TestCase):
         # End-to-end through the payload builder. AAD injection is stubbed
         # so the test stays hermetic (no credential/provider resolution).
         with patch.object(model_client, "_maybe_inject_azure_aad_token", lambda *a, **k: None), \
+             patch.object(model_client, "_inject_azure_responses_aad_header", lambda *a, **k: None), \
              patch.dict("os.environ", {"AZURE_API_VERSION": "2025-04-01-preview"}, clear=False):
             payload = model_client._build_responses_payload("azure/gpt-5.5", "hi", None)
         self.assertEqual(payload.get("api_version"), "2025-04-01-preview")
@@ -973,9 +975,67 @@ class AzureResponsesApiVersionInjectionTest(unittest.TestCase):
         # user-supplied api_version must take precedence.
         opts = model_client.GenerateOptions(extra_kwargs={"api_version": "2024-05-01-preview"})
         with patch.object(model_client, "_maybe_inject_azure_aad_token", lambda *a, **k: None), \
+             patch.object(model_client, "_inject_azure_responses_aad_header", lambda *a, **k: None), \
              patch.dict("os.environ", {"AZURE_API_VERSION": "2025-04-01-preview"}, clear=False):
             payload = model_client._build_responses_payload("azure/gpt-5.5", "hi", opts)
         self.assertEqual(payload.get("api_version"), "2024-05-01-preview")
+
+
+class AzureResponsesAadHeaderInjectionTest(unittest.TestCase):
+    """``_inject_azure_responses_aad_header`` bridges LiteLLM's missing AAD
+    support on the Azure Responses path by injecting an
+    ``Authorization: Bearer`` header for ``azure/*`` calls under AAD. It
+    must be a no-op for api-key mode, non-Azure families, and when the
+    token provider is unavailable, and must never clobber an explicit
+    Authorization header.
+    """
+
+    def _inject(self, model: str, *, mode: object, provider: object, payload=None) -> dict:
+        payload = {} if payload is None else payload
+        with patch.object(model_client.azure_auth, "_AZURE_AUTH_MODE", mode), \
+             patch.object(model_client.azure_auth, "get_azure_token_provider", return_value=provider):
+            model_client._inject_azure_responses_aad_header(model, payload)
+        return payload
+
+    def test_azure_aad_injects_bearer(self) -> None:
+        payload = self._inject("azure/gpt-5.4-mini", mode="aad", provider=lambda: "TOK")
+        self.assertEqual(payload.get("extra_headers", {}).get("Authorization"), "Bearer TOK")
+
+    def test_azure_aad_fallback_injects_bearer(self) -> None:
+        payload = self._inject("azure/gpt-5.4-mini", mode="aad-fallback", provider=lambda: "TOK")
+        self.assertEqual(payload.get("extra_headers", {}).get("Authorization"), "Bearer TOK")
+
+    def test_key_mode_is_noop(self) -> None:
+        # LiteLLM's own api-key path works in key mode; don't override it.
+        payload = self._inject("azure/gpt-5.4-mini", mode="key", provider=lambda: "TOK")
+        self.assertNotIn("extra_headers", payload)
+
+    def test_non_azure_model_is_noop(self) -> None:
+        payload = self._inject("openai/gpt-5.4-mini", mode="aad", provider=lambda: "TOK")
+        self.assertNotIn("extra_headers", payload)
+
+    def test_missing_provider_is_noop(self) -> None:
+        payload = self._inject("azure/gpt-5.4-mini", mode="aad", provider=None)
+        self.assertNotIn("extra_headers", payload)
+
+    def test_existing_authorization_not_overwritten(self) -> None:
+        payload = self._inject(
+            "azure/gpt-5.4-mini", mode="aad", provider=lambda: "TOK",
+            payload={"extra_headers": {"Authorization": "Bearer PREEXISTING"}},
+        )
+        self.assertEqual(payload["extra_headers"]["Authorization"], "Bearer PREEXISTING")
+
+    def test_build_responses_payload_wires_bearer_and_api_version(self) -> None:
+        # End-to-end: the Responses payload builder must both forward the
+        # api-version (classic route) and attach the AAD bearer header.
+        opts = model_client.GenerateOptions(web_search=True)
+        with patch.object(model_client, "_maybe_inject_azure_aad_token", lambda *a, **k: None), \
+             patch.object(model_client.azure_auth, "_AZURE_AUTH_MODE", "aad"), \
+             patch.object(model_client.azure_auth, "get_azure_token_provider", return_value=lambda: "TOK"), \
+             patch.dict("os.environ", {"AZURE_API_VERSION": "2025-04-01-preview"}, clear=False):
+            payload = model_client._build_responses_payload("azure/gpt-5.4-mini", "hi", opts)
+        self.assertEqual(payload["extra_headers"]["Authorization"], "Bearer TOK")
+        self.assertEqual(payload.get("api_version"), "2025-04-01-preview")
 
 
 class ResponsesApiGuardForwardingTest(unittest.TestCase):

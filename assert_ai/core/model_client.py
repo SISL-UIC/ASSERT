@@ -475,6 +475,43 @@ def _maybe_inject_azure_responses_api_version(model: str, payload: dict[str, Any
         payload["api_version"] = api_version
 
 
+def _inject_azure_responses_aad_header(model: str, payload: dict[str, Any]) -> None:
+    """Attach an ``Authorization: Bearer`` header to ``azure/*`` Responses payloads under AAD.
+
+    LiteLLM's Azure Responses path — unlike its Chat Completions path —
+    does not apply the ``azure_ad_token_provider`` callable (nor a static
+    ``azure_ad_token``); it only supports api-key auth. Under Entra/AAD
+    that leaves the web-search Responses call with no valid credential:
+    LiteLLM silently falls back to whatever ``AZURE_OPENAI_API_KEY`` /
+    ``AZURE_API_KEY`` is in the environment, which is typically the wrong
+    resource or a stale key and gets rejected with a 401.
+
+    We bridge the gap by resolving the AAD token here and injecting it as
+    an explicit ``extra_headers`` bearer, which LiteLLM *does* forward on
+    the Responses request — matching a hand-rolled ``Authorization:
+    Bearer`` curl against ``/openai/responses``.
+
+    No-op for non-``azure/*`` families, for api-key auth mode (LiteLLM's
+    own api-key path already works), and when ``azure-identity`` is
+    unavailable so the provider is ``None`` (that case is surfaced by
+    :func:`_maybe_inject_azure_aad_token`, which runs first). Runs before
+    ``extra_kwargs`` is merged, and uses ``setdefault`` so an explicit
+    user-supplied Authorization header still wins.
+    """
+    if _model_family(model) != "azure":
+        return
+    if azure_auth._get_azure_auth_mode() == "key":
+        return
+    provider = azure_auth.get_azure_token_provider(azure_auth.AZURE_OPENAI_SCOPE)
+    if provider is None:
+        return
+    headers = payload.get("extra_headers")
+    if not isinstance(headers, dict):
+        headers = {}
+    headers.setdefault("Authorization", f"Bearer {provider()}")
+    payload["extra_headers"] = headers
+
+
 def _supports_web_search_preview(model: str) -> bool:
     """Whether this model can use the Responses API web_search_preview tool.
 
@@ -707,6 +744,7 @@ def _build_responses_payload(
         payload["reasoning_effort"] = resolved_options.reasoning_effort
     _maybe_inject_azure_aad_token(model, payload)
     _maybe_inject_azure_responses_api_version(model, payload)
+    _inject_azure_responses_aad_header(model, payload)
     payload.update(resolved_options.extra_kwargs)
     return payload
 
