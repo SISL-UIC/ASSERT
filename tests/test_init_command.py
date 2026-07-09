@@ -104,12 +104,28 @@ class InitPromptContentTest(unittest.TestCase):
     def test_prompt_contains_required_section_anchors(self) -> None:
         prompt = build_system_message()
         for anchor in (
+            "### 0. Mode Selection",
             "### 1. Application Context",
             "### 3. Pipeline Default Model",
+            "Automatic harm-template flow",
             "policy_violation",
             "overrefusal",
         ):
             self.assertIn(anchor, prompt, f"missing anchor: {anchor!r}")
+
+    def test_prompt_injects_harm_template_skill(self) -> None:
+        """The automatic flow relies on the harm skill being injected.
+
+        Guards both the wrapper preamble (which adapts the skill to the
+        no-web-tools init runtime) and a distinctive line from the skill
+        body itself, so a broken loader can't silently drop the skill.
+        """
+        prompt = build_system_message()
+        self.assertIn("Harm Eval Template Skill", prompt)
+        # Adaptation preamble reconciling the skill with the init runtime.
+        self.assertIn("do **not** have live web-browsing tools", prompt)
+        # A stable line from the skill body (SKILL.md H1 title).
+        self.assertIn("ASSERT Harm Eval Config Builder", prompt)
 
     def test_prompt_includes_default_model_hint_when_provided(self) -> None:
         prompt = build_system_message(default_model_hint="azure/gpt-5.4")

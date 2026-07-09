@@ -21,6 +21,13 @@ log = logging.getLogger(__name__)
 
 _PROMPT_FILENAME = "init_system.md"
 _CONFIG_REF_PATH = Path(__file__).resolve().parents[2] / "docs" / "config" / "schema.md"
+_HARM_SKILL_PATH = (
+    Path(__file__).resolve().parents[2]
+    / ".github"
+    / "skills"
+    / "assert-add-harm-eval-template"
+    / "SKILL.md"
+)
 
 # Token budget thresholds (fraction of model context window).
 _WARN_THRESHOLD = 0.50
@@ -74,6 +81,49 @@ def _build_schema_reference() -> str:
         log.warning("docs/config/schema.md not found at %s", _CONFIG_REF_PATH)
         return ""
     return _CONFIG_REF_PATH.read_text(encoding="utf-8")
+
+
+def _build_harm_skill_section() -> str:
+    """Load the harm-eval-template skill for the automatic init flow.
+
+    The design agent injects this so that, when the user picks the
+    *Automatic harm-template flow*, the LLM can follow the same
+    methodology as the standalone ``assert-add-harm-eval-template``
+    skill. The skill file is the single source of truth; here we wrap it
+    with an adaptation preamble that reconciles the skill's agent-oriented
+    steps (live web research, writing files) with the ``assert-ai init``
+    runtime, which drives a single LLM via an ask/propose/done protocol
+    and has no browsing tools.
+    """
+    if not _HARM_SKILL_PATH.is_file():
+        log.warning("Harm eval template skill not found at %s", _HARM_SKILL_PATH)
+        return ""
+    skill_text = _HARM_SKILL_PATH.read_text(encoding="utf-8")
+    return (
+        "## Harm Eval Template Skill (for the Automatic harm-template flow)\n\n"
+        "When the user chooses the Automatic harm-template flow, follow the "
+        "methodology below to design the config. Adapt it to this "
+        "conversation's runtime:\n\n"
+        "- You run inside `assert-ai init` and do **not** have live web-browsing "
+        "tools. Never claim to have retrieved pages this session and never "
+        "fabricate citation URLs. Ground behavior categories and dimensions in "
+        "your knowledge of the recognized frameworks the skill names (MLCommons "
+        "AILuminate, NIST AI RMF, Microsoft Responsible AI, OWASP LLM Top 10) "
+        "and, above all, reuse the repo behavior/judge presets from the preset "
+        "catalog above. Tag each researched item with the framework it draws on "
+        "(e.g. `# source: NIST AI RMF (model knowledge)`) instead of a URL, and "
+        "skip the skill's `# References` URL list. The systematize stage's "
+        "`web_search: true` performs the live enrichment when the pipeline runs.\n"
+        "- Produce the config through the init `ask`/`propose`/`done` protocol as "
+        "a single `yaml` string in your JSON response. Do **not** write files, "
+        "reference an output path, or emit YAML frontmatter — `assert-ai init` "
+        "owns file writing.\n"
+        "- Keep everything customer-safe: describe the harm for detection and "
+        "refusal only, never operational harmful content.\n\n"
+        "---\n\n"
+        f"{skill_text}\n"
+    )
+
 
 
 def _build_preset_catalog() -> str:
@@ -193,10 +243,16 @@ def build_system_message(
     """
     template = load_prompt_text(_PROMPT_FILENAME)
 
+    # Load the harm-template skill once and reuse it in both the full and
+    # trimmed section lists — it drives the Automatic harm-template flow and
+    # is small relative to the schema reference, so it survives trimming.
+    harm_skill = _build_harm_skill_section()
+
     # Build optional sections.
     sections = [
         _build_schema_reference(),
         _build_preset_catalog(),
+        harm_skill,
         _build_seed_section(seed_path),
         _build_behavior_section(behavior),
         _build_judge_section(judge_preset),
@@ -220,6 +276,7 @@ def build_system_message(
             estimated, model, ctx_window,
         )
         trimmed_sections = [
+            harm_skill,
             _build_seed_section(seed_path),
             _build_behavior_section(behavior),
             _build_judge_section(judge_preset),

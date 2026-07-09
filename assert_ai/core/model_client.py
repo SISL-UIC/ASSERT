@@ -38,8 +38,11 @@ import json
 import logging
 import os
 import random
+import sys
 import time
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field, is_dataclass, replace
+from pathlib import Path
 from typing import Any, Iterator, Mapping, Sequence
 
 from assert_ai.core import azure_auth
@@ -685,16 +688,59 @@ def _responses_client(litellm: Any) -> tuple[Any, bool]:
     raise ValueError("web_search requires a LiteLLM responses client")
 
 
+@contextmanager
+def _litellm_import_context() -> Iterator[None]:
+    """Temporarily remove local checkout paths that shadow LiteLLM's tokenizer plugins."""
+    original_path = list(sys.path)
+    shadowing_entries: list[str] = []
+    for entry in original_path:
+        if not entry:
+            continue
+        path = Path(entry).expanduser()
+        if not path.exists():
+            continue
+        # Never drop the directory that actually provides LiteLLM. A real
+        # ``pip install`` puts litellm and tiktoken's ``tiktoken_ext`` namespace
+        # package in the same site-packages, so matching ``tiktoken_ext`` alone
+        # would remove the environment's site-packages and make litellm
+        # unimportable. Only shadowing local checkouts (which carry the tokenizer
+        # plugins or internal markers but not litellm itself) should be dropped.
+        if (path / "litellm").exists():
+            continue
+        if any((path / marker).exists() for marker in ("tiktoken_ext", "sciclone_utils", "clusters")):
+            shadowing_entries.append(entry)
+
+    if shadowing_entries:
+        filtered_path = [entry for entry in original_path if entry not in shadowing_entries]
+        sys.path[:] = filtered_path
+    try:
+        yield
+    finally:
+        sys.path[:] = original_path
+
+
 def _get_litellm_module() -> Any:
     global _LITELLM_MODULE
     if _LITELLM_MODULE is None:
-        try:
-            _LITELLM_MODULE = importlib.import_module("litellm")
-        except ModuleNotFoundError as exc:
-            raise RuntimeError(
-                "litellm is not installed. Install it with `python -m pip install litellm` "
-                "before using assert_ai.core.model_client."
-            ) from exc
+        last_exc: Exception | None = None
+        for attempt in range(2):
+            try:
+                with _litellm_import_context():
+                    _LITELLM_MODULE = importlib.import_module("litellm")
+                break
+            except Exception as exc:  # pragma: no cover - exercised via regression test
+                last_exc = exc
+                if attempt == 1:
+                    if isinstance(exc, ModuleNotFoundError):
+                        raise RuntimeError(
+                            "litellm is not installed. Install it with `python -m pip install litellm` "
+                            "before using assert_ai.core.model_client."
+                        ) from exc
+                    raise
+                for module_name in ("litellm", "tiktoken", "tiktoken_ext", "sciclone_utils", "clusters"):
+                    sys.modules.pop(module_name, None)
+        if _LITELLM_MODULE is None:
+            raise RuntimeError("LiteLLM import unexpectedly failed") from last_exc
         # Silence noisy litellm warnings that pollute stderr
         _LITELLM_MODULE.suppress_debug_info = True
         # Disable LiteLLM's internal retry so _with_retries is the
