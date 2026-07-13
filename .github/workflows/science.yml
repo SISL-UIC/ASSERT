@@ -28,7 +28,6 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, labeled]
     paths:
-      - 'assert_ai/**'
       - 'scripts/regression_*.py'
       - 'tests/regression/**'
       - 'tests/test_regression_*.py'
