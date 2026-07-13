@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from statistics import mean, median
 from typing import Any, Iterable
 
 from assert_ai.core.io import load_json, load_jsonl, row_behavior
@@ -31,8 +32,30 @@ def current_stage_status(manifest: dict[str, Any] | None) -> tuple[str, str]:
     return "unknown", "—"
 
 
+def _dimension_scale(row: dict[str, Any], metric: str) -> dict[str, Any] | None:
+    scales = row.get("dimension_scales")
+    if not isinstance(scales, dict):
+        return None
+    scale = scales.get(metric)
+    return scale if isinstance(scale, dict) else None
+
+
+def _ordinal_scale_values(scale: dict[str, Any] | None) -> list[int | str]:
+    if not isinstance(scale, dict) or scale.get("type") != "ordinal":
+        return []
+    return [
+        entry["value"]
+        for entry in scale.get("values", [])
+        if (
+            isinstance(entry, dict)
+            and not isinstance(entry.get("value"), bool)
+            and isinstance(entry.get("value"), (int, str))
+        )
+    ]
+
+
 def detect_dimensions(rows: Iterable[dict[str, Any]]) -> list[str]:
-    """Collect all binary verdict dimensions present in the provided rows."""
+    """Collect all configured verdict dimensions present in the provided rows."""
     seen: set[str] = set()
     for row in rows:
         verdict = row.get("verdict")
@@ -42,17 +65,84 @@ def detect_dimensions(rows: Iterable[dict[str, Any]]) -> list[str]:
         if not isinstance(dimensions, dict):
             continue
         for key, value in dimensions.items():
-            if is_valid_event_flag(value) or is_not_applicable_dimension(verdict, key):
+            scale_values = _ordinal_scale_values(_dimension_scale(row, key))
+            expected_type = str if scale_values and isinstance(scale_values[0], str) else int
+            is_ordinal = (
+                bool(scale_values)
+                and not isinstance(value, bool)
+                and isinstance(value, expected_type)
+                and value in scale_values
+            )
+            if is_valid_event_flag(value) or is_ordinal or is_not_applicable_dimension(verdict, key):
                 seen.add(key)
     return sorted(seen)
 
 
 def compute_dimension_summary(rows: Iterable[dict[str, Any]], metric: str) -> dict[str, Any]:
-    """Summarize one binary metric over a set of judged rows."""
+    """Summarize one binary or ordinal metric over judged rows."""
+    row_list = list(rows)
+    scale = next(
+        (
+            candidate
+            for row in row_list
+            if (candidate := _dimension_scale(row, metric)) is not None
+        ),
+        None,
+    )
+    scale_values = _ordinal_scale_values(scale)
+    if scale_values:
+        grade_counts = {str(value): 0 for value in scale_values}
+        grades: list[int | str] = []
+        expected_type = str if isinstance(scale_values[0], str) else int
+        not_applicable_count = 0
+        for row in row_list:
+            if infer_judge_status(row) != "ok":
+                continue
+            verdict = row.get("verdict")
+            value = get_verdict_dimension(verdict, metric)
+            if (
+                not isinstance(value, bool)
+                and isinstance(value, expected_type)
+                and value in scale_values
+            ):
+                grade_counts[str(value)] += 1
+                grades.append(value)
+                continue
+            if is_not_applicable_dimension(verdict, metric):
+                not_applicable_count += 1
+        total = len(grades)
+        numeric_grades = [value for value in grades if isinstance(value, int)]
+        if len(numeric_grades) == total and numeric_grades:
+            median_grade: int | str | float | None = float(median(numeric_grades))
+            mean_grade: float | None = mean(numeric_grades)
+        elif grades:
+            order = {value: index for index, value in enumerate(scale_values)}
+            ordered = sorted(grades, key=order.__getitem__)
+            median_grade = ordered[(len(ordered) - 1) // 2]
+            mean_grade = None
+        else:
+            median_grade = None
+            mean_grade = None
+        return {
+            "kind": "ordinal",
+            "rate": None,
+            "counts": grade_counts,
+            "rates": {
+                key: count / total if total else 0.0
+                for key, count in grade_counts.items()
+            },
+            "count": total,
+            "applicable_count": total,
+            "not_applicable_count": not_applicable_count,
+            "median": median_grade,
+            "mean": mean_grade,
+            "scale": scale,
+        }
+
     counts = {0: 0, 1: 0}
     total = 0
     not_applicable_count = 0
-    for row in rows:
+    for row in row_list:
         if infer_judge_status(row) != "ok":
             continue
         verdict = row.get("verdict")
