@@ -165,7 +165,7 @@ These skills are for end users running evaluations, not for repository maintenan
 
 | Skill | Claude Code | GitHub Copilot | Cursor | What it does |
 |---|---|---|---|---|
-| `run-assert-eval` | `.claude/skills/run-assert-eval/SKILL.md` | `.github/prompts/run-assert-eval.prompt.md` | `.cursor/rules/assert.mdc` | Generate config from requirements, run pipeline, summarize results with cited failures. Reports policy violation and overrefusal separately. |
+| `run-assert-eval` | `.claude/skills/run-assert-eval/SKILL.md` | `.github/prompts/run-assert-eval.prompt.md` | `.cursor/rules/assert.mdc` | Discover risks with the real Clarity CLI in-IDE, split selected risks into one atomic config per behavior, run pipeline, summarize results with cited failures. Reports policy violation and overrefusal separately. |
 
 ## Output style for coding agents
 

@@ -1,26 +1,30 @@
 ---
 agent: agent
-description: 'Run an ASSERT evaluation from a plain-language behavior requirement. Generates or reuses an eval_config.yaml, runs the assert-ai pipeline, and reports per-dimension pass/violation rates with trace-cited failure examples.'
+description: 'Run an ASSERT evaluation starting from Clarity-discovered risks. Runs the real Clarity CLI in-IDE to discover risks, generates one atomic eval_config.yaml per selected risk, runs the assert-ai pipeline, and reports per-dimension pass/violation rates with trace-cited failure examples.'
 ---
 
 # Run an ASSERT evaluation
 
-You help the user run an end-to-end ASSERT evaluation from a plain-language behavior requirement. You orchestrate existing `assert-ai` CLI commands — you do not reimplement any pipeline logic.
+You help the user run an end-to-end ASSERT evaluation whose risks are discovered with Clarity. You orchestrate existing `clarity` and `assert-ai` CLI commands — you do not reimplement Clarity's questioning or any pipeline logic.
 
 Read `AGENTS.md` at the repository root for full orientation on the ASSERT project, terminology, and target selection.
 
 ## When to use
 
-The user describes a behavior they want their agent or model to follow or avoid, and wants evidence of how it actually behaves. This skill finds and reports failures — it is not for fixing the agent.
+The user wants evidence of how their agent or model actually behaves. This skill finds and reports failures — it is not for fixing the agent.
 
 This skill has two entry modes:
 
-- **Run mode** — no usable results exist yet: generate or reuse a config, run the pipeline (Steps 1-3), then report (Step 4).
-- **Results Q&A mode** — judged artifacts already exist under `artifacts/results/<suite>/<run>/` and the user asks a *question* about them ("what are the highlights?", "top 3 examples of the worst failure mode?", "why did case X fail?"). Skip to Step 4 and answer THAT question from the artifacts — do not re-run, and do not fall back to the full canned report unless asked.
+- **Run mode** — no usable results exist yet. Risks come from **Clarity** (Steps 1-2): an existing `.clarity-protocol/` directory or a fresh run of the real Clarity CLI, driven in-IDE. Then turn each selected risk into an atomic config, run the pipeline (Steps 3-5), then report (Step 6).
+- **Results Q&A mode** — judged artifacts already exist under `artifacts/results/<suite>/<run>/` and the user asks a *question* about them ("what are the highlights?", "top 3 examples of the worst failure mode?", "why did case X fail?"). Skip to Step 6 and answer THAT question from the artifacts — do not re-run, and do not fall back to the full canned report unless asked.
+
+### Clarity is required for Run mode — no non-Clarity fallback
+
+Risks that seed an eval MUST come from Clarity (an existing `.clarity-protocol/` or a fresh real Clarity run). Do **not** substitute a plain-language description, and do **not** imitate Clarity's questioning yourself — an eval spec that skips Clarity's captured risks produces inaccurate, low-signal results. If Clarity cannot be installed, authenticated, or run, STOP and help the user fix it (Preconditions) rather than proceeding.
 
 ### Copilot vs. the local viewer
 
-Copilot is for *answering questions* and *synthesis* — direct answers, failure-mode clustering, cited examples, next actions — with no clicking. The bundled local viewer is for *visual exploration* — forest plots, baseline compare, facet grouping, and stepping through a transcript with the judge's citations highlighted. Answer in chat when the user asks "what / why / which"; hand off to the viewer (Step 5) when they want to *see*, *read a full transcript*, *compare runs*, or *watch a live run*.
+Copilot is for *answering questions* and *synthesis* — direct answers, failure-mode clustering, cited examples, next actions — with no clicking. The bundled local viewer is for *visual exploration* — forest plots, baseline compare, facet grouping, and stepping through a transcript with the judge's citations highlighted. Answer in chat when the user asks "what / why / which"; hand off to the viewer (Step 7) when they want to *see*, *read a full transcript*, *compare runs*, or *watch a live run*.
 
 ## Preconditions (check, don't assume)
 
@@ -29,27 +33,59 @@ Copilot is for *answering questions* and *synthesis* — direct answers, failure
    python -m pip install -e ".[otel,langgraph]"
    ```
 
-2. **Provider creds exist** in `.env`. NEVER read or print `.env`. If a run fails with an auth error, tell the user which variable NAMES are required (AZURE_API_KEY, AZURE_API_BASE, OPENAI_API_KEY, etc.) — never their values.
+2. **Clarity CLI installed** (required for Run mode): `clarity doctor` succeeds. Clarity is the risk-discovery engine — the skill calls its real backend, it does not reimplement it. If missing, guide the real install (from https://github.com/microsoft/clarity-agent):
+   ```
+   # macOS / Linux
+   curl -fsSL https://raw.githubusercontent.com/microsoft/clarity-agent/main/scripts/install.sh | bash
+   # Windows (PowerShell)
+   irm https://raw.githubusercontent.com/microsoft/clarity-agent/main/scripts/install.ps1 | iex
+   ```
+   Select the LLM provider that matches THIS assistant so Clarity runs on the same credentials/model and the whole conversation stays in the IDE — GitHub Copilot → `--provider github` (reuses `copilot auth login`). If Clarity cannot be installed, authenticated, or run, STOP and help the user resolve it. Do not proceed with a non-Clarity path.
+
+3. **Provider creds exist** in `.env`. NEVER read or print `.env`. If a run fails with an auth error, tell the user which variable NAMES are required (AZURE_API_KEY, AZURE_API_BASE, OPENAI_API_KEY, GITHUB_TOKEN, ANTHROPIC_API_KEY, etc.) — never their values.
 
 ## Steps
 
-### 1. Get or make a config
+### 1. Discover risks with Clarity (required front door)
 
-- **If the user has an existing config**, use `--from <path>` to extend it:
-  ```
-  assert-ai init --from <path> --model <litellm-model> --non-interactive -o eval_config.yaml
-  ```
+Risks come from Clarity's real engine, run in the IDE's integrated terminal — never from a plain-language guess and never by imitating Clarity yourself.
 
-- **If the user provides a plain-language requirement**, generate from scratch:
+- **If a `.clarity-protocol/` directory already exists** in the workspace, use it directly as the risk source — skip straight to reading its output below.
+- **Otherwise run the real Clarity CLI in the terminal**, using the provider that matches this assistant (see Preconditions):
   ```
-  assert-ai init --model <litellm-model> --describe "<user requirement + target context>" --non-interactive -o eval_config.yaml
+  clarity embed .                       # wire the protocol into the repo
+  clarity cli . --provider github
   ```
+  Clarity's own `ClaritySession` drives problem-clarification → failure-brainstorming (its multi-perspective thinker architecture). The user answers Clarity's questions right here in the IDE; Clarity writes the real `.clarity-protocol/`.
 
-- **If the spec is vague**, ask ONE clarifying question first — vague specs produce vague test sets.
+Read Clarity's output to enumerate risks:
 
+- **`.clarity-protocol/failures/failures.md`** — the failure modes, causal chains, and management plans. Each distinct failure mode is one candidate ASSERT behavior.
+- **`.clarity-protocol/summary.md`, `goal/requirements.md`, `solution/architecture.md`** — target/context for the eval's `context` field.
+
+Clarity records severity/management-plan signal but no literal P1/P2/P3 — order and annotate by what Clarity actually captured; do not fabricate priorities.
+
+### 2. Triage — choose which risks to measure now
+
+Clarity intentionally over-produces (whole-lifecycle threat modeling). Do NOT auto-generate an eval for every failure mode. Surface the enumerated list (ordered by Clarity's severity signal) and ask the user which to measure now (e.g. "top-severity only?", or named picks). Carry only the selected risks forward.
+
+### 3. Turn each selected risk into an atomic config
+
+ASSERT performs best with **one atomic behavior per eval**. Never bundle multiple risks into one config — bundling makes `policy_violation` a fuzzy logical-OR and hides per-behavior signal.
+
+- **1 selected risk** → generate one config and run once.
+- **N selected risks** → generate N atomic `eval_config.yaml` files and run them sequentially, one per behavior.
+
+For each selected risk, map the Clarity failure mode → `behavior.name` + `behavior.description`, and use its context for `context`:
+
+```
+assert-ai init --model <litellm-model> --describe "<failure mode + how it arises + target context>" --non-interactive -o eval_config.yaml
+```
+
+- **If the user has an existing config** to extend, use `--from <path>` instead of generating from scratch.
 - After generation, show the user the generated `behavior.description`, `context`, and `pipeline.judge` dimensions. Confirm before running.
 
-### 2. Identify the target shape
+### 4. Identify the target shape
 
 Help the user set the right target in the config:
 
@@ -57,18 +93,15 @@ Help the user set the right target in the config:
 - **Hosted model** with a system prompt and optional tools: use `target.model` and `target.tools`.
 - **Pre-collected traces** (no live inference needed): use `assert-ai judge-traces --traces <path> --config <path>`.
 
-### 3. Run the pipeline
+### 5. Run the pipeline
 
 ```
 assert-ai run --config eval_config.yaml --output json
 ```
 
-This is long-running (systematize -> test_set -> inference -> judge). Stream status to the user as each stage completes.
+This is long-running (systematize -> test_set -> inference -> judge). Stream status to the user as each stage completes. For N configs, run them sequentially and track each `suite`/`run`. Re-run from a stage with `--force-stage <stage>`. Note the `suite` and `run` names from the config for Step 6.
 
-- To re-run from a specific stage: `--force-stage <stage>`
-- Note the `suite` and `run` names from the config for Step 4.
-
-### 4. Report results — never collapse to one number
+### 6. Report results — never collapse to one number
 
 **Read only structured artifacts.** Aggregate from the pre-computed, schema'd files — never trawl raw Phoenix/OpenTelemetry traces to reconstruct an answer (that bulk, unguided trace-reading is exactly what the viewer's evidence drawer is for). Reading the `inference_set.jsonl` row for a *specific case the judge already cited* is fine; bulk trace trawling is not.
 
@@ -84,7 +117,7 @@ This is long-running (systematize -> test_set -> inference -> judge). Stream sta
 
 For **Results Q&A mode**, answer the user's specific question from these same artifacts (e.g. rank dimensions by flagged rate for "top failure mode", then quote `dimension_justifications` for the cited examples). Don't emit the full template unless asked.
 
-### 5. Hand off to the local viewer
+### 7. Hand off to the local viewer
 
 After reporting, point the user to the bundled viewer for anything visual or self-directed — it went through extensive design iteration and owns the exploration surface Copilot should not replicate:
 
@@ -119,10 +152,13 @@ For each failure:
 
 ## Guardrails
 
+- **Clarity is the required risk source** — for Run mode, risks come from Clarity (existing `.clarity-protocol/` or a fresh real run). Never substitute a plain-language guess or imitate Clarity's questioning; if Clarity can't run, stop and help fix it.
+- **Call the real Clarity CLI in-IDE** — invoke `clarity` in the integrated terminal on the provider matching this assistant; never hand the user off to a separate Clarity app.
+- **One atomic behavior per config** — split N selected risks into N configs run sequentially; never bundle.
+- **Triage before running** — never auto-generate an eval for every Clarity failure mode; ask which to measure now.
 - **Don't invent metrics** — only report what's in the artifacts.
 - **Don't trawl raw traces to answer questions** — answer from `results status`, `scores.jsonl`, and `metrics.json`; hand off to the viewer for visual trace/transcript exploration.
 - **Hand off, don't reimplement the viewer** — for visual drill-down, baseline compare, or live monitoring, point to the local viewer rather than reproducing it in chat.
 - **Don't read, print, or commit** `.env`, credential values, `artifacts/`, traces, `.venv`, or logs.
-- **If the spec is vague**, ask one clarifying question FIRST.
-- **Reference env variable NAMES only** (AZURE_API_KEY, AZURE_API_BASE, azure_ad_token) — never values.
+- **Reference env variable NAMES only** (AZURE_API_KEY, AZURE_API_BASE, azure_ad_token, GITHUB_TOKEN, ANTHROPIC_API_KEY) — never values.
 - **Don't commit artifacts** to the repository.
