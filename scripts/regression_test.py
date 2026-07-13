@@ -51,7 +51,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from p2m.core.io import SCORES_FILE, load_jsonl
+from assert_ai.core.io import SCORES_FILE, load_jsonl
 
 from scripts.regression_decision import (
     DECISION_BLOCK,
@@ -69,14 +69,14 @@ DEFAULT_CONFIGS: tuple[Path, ...] = (
 
 # Files whose change requires rerunning upstream (cacheable) stages.
 UPSTREAM_STAGE_FILES: tuple[str, ...] = (
-    "p2m/stages/systematize.py",
-    "p2m/stages/stratification.py",
-    "p2m/stages/test_set.py",
-    "p2m/core/artifact_cache.py",
-    "prompts/systematize_system.md",
-    "prompts/test_set_direct_single.md",
-    "prompts/test_set_scenario_single.md",
-    "prompts/test_set_stratification.md",
+    "assert_ai/stages/systematize.py",
+    "assert_ai/stages/stratification.py",
+    "assert_ai/stages/test_set.py",
+    "assert_ai/core/artifact_cache.py",
+    "assert_ai/internal_pipeline_prompts/systematize_system.md",
+    "assert_ai/internal_pipeline_prompts/test_set_direct_single.md",
+    "assert_ai/internal_pipeline_prompts/test_set_scenario_single.md",
+    "assert_ai/internal_pipeline_prompts/test_set_stratification.md",
 )
 
 
@@ -195,7 +195,7 @@ def ensure_worktree(commit_sha: str) -> Path:
     """Create (or reuse) a git worktree pinned at ``commit_sha``.
 
     Worktrees let baseline + treatment runs use the actual file tree of
-    each commit (including ``p2m/`` source, ``prompts/``, configs) without
+    each commit (including ``assert_ai/`` source, packaged prompts, configs) without
     mutating the main checkout. Without this, both runs would share the
     treatment's source code and the comparison would be a trivial no-op.
     """
@@ -215,8 +215,8 @@ def ensure_worktree(commit_sha: str) -> Path:
 
 
 def _apply_test_set_diagnostic(worktree: Path) -> None:
-    """Patch ``p2m/stages/test_set.py`` to print response details on invalid payloads."""
-    target = worktree / "p2m" / "stages" / "test_set.py"
+    """Patch ``assert_ai/stages/test_set.py`` to print invalid response details."""
+    target = worktree / "assert_ai" / "stages" / "test_set.py"
     if not target.exists():
         return
     try:
@@ -341,7 +341,7 @@ def run_pipeline(
     upstream_model: str,
     extra_overrides: dict[str, Any] | None = None,
 ) -> Path:
-    """Run ``p2m run`` against one config from a worktree at ``commit_sha``.
+    """Run ``assert-ai run`` against one config from a worktree at ``commit_sha``.
 
     Pipeline outputs land in ``<worktree>/artifacts/results/<suite>/<run>/``;
     we copy the run dir to ``REPO_ROOT/artifacts/regression-runs/`` so they
@@ -377,11 +377,11 @@ def run_pipeline(
     )
 
     cmd = [
-        sys.executable, "-m", "p2m.cli", "run",
+        sys.executable, "-m", "assert_ai.cli", "run",
         "--config", str(rendered),
     ]
-    # Prepend the worktree to PYTHONPATH so ``import p2m`` resolves to
-    # the worktree's source (and ``BASE_DIR`` -> worktree's prompts/),
+    # Prepend the worktree to PYTHONPATH so ``import assert_ai`` resolves to
+    # the worktree's source and packaged prompt resources,
     # NOT the editable-install pointing at the main checkout. Without
     # this, baseline + treatment runs would import the same source code.
     env = os.environ.copy()

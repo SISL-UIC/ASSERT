@@ -37,8 +37,8 @@ import math
 from dataclasses import dataclass, field
 from typing import Any, Iterable
 
-from p2m.core.io import row_behavior
-from p2m.core.judge import (
+from assert_ai.core.io import row_behavior
+from assert_ai.core.judge import (
     get_verdict_dimension,
     infer_judge_status,
     is_valid_event_flag,
