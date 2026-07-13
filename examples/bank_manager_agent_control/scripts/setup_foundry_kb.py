@@ -50,17 +50,14 @@ def _cfg() -> dict:
     zava_base = os.environ.get("ZAVA_API_BASE", "").rstrip("/")
     return {
         "endpoint": endpoint,
-        "key": os.environ["SEARCH_API_KEY"],
         "api_version": api_version,
         "kb_name": os.environ.get("AZURE_SEARCH_KB_NAME", "bank-policy-kb"),
         "embed_dep": embed_dep,
         # Embedding REST: ZAVA v1-style (Authorization: Bearer + model in body).
         "embed_v1_base": zava_base,
-        "embed_key": os.environ.get("ZAVA_API_KEY", ""),
         # Resource URI the SEARCH service uses for the *query-time* vectorizer.
         # Derived from the v1 base host (…/openai/v1 -> https://<host>).
         "aoai_resource_uri": _aoai_resource_uri(zava_base),
-        "aoai_key": os.environ.get("ZAVA_API_KEY", ""),
         "synth_model": os.environ.get("AGENT_MODEL", "gpt-5.4-mini"),
     }
 
@@ -69,6 +66,21 @@ def _aoai_resource_uri(v1_base: str) -> str:
     # https://zava-foundry.openai.azure.com/openai/v1 -> https://zava-foundry.openai.azure.com
     m = re.match(r"(https://[^/]+)", v1_base or "")
     return m.group(1) if m else ""
+
+
+# Secrets are read via these accessors and passed directly to request helpers —
+# deliberately NOT stored in the _cfg() dict, so config values can be logged
+# without ever routing a credential through a print/log sink.
+def _search_key() -> str:
+    return os.environ["SEARCH_API_KEY"]
+
+
+def _embed_key() -> str:
+    return os.environ.get("ZAVA_API_KEY", "")
+
+
+def _aoai_key() -> str:
+    return os.environ.get("ZAVA_API_KEY", "")
 
 
 # ── REST helpers ─────────────────────────────────────────────────────────────
@@ -104,8 +116,8 @@ def embed(cfg: dict, texts: list[str]) -> list[list[float]]:
         data = json.dumps(body).encode()
         req = urllib.request.Request(
             url, data=data, method="POST",
-            headers={"Authorization": f"Bearer {cfg['embed_key']}",
-                     "api-key": cfg["embed_key"], "Content-Type": "application/json"},
+            headers={"Authorization": f"Bearer {_embed_key()}",
+                     "api-key": _embed_key(), "Content-Type": "application/json"},
         )
         with urllib.request.urlopen(req, timeout=90) as r:
             j = json.loads(r.read().decode())
@@ -165,7 +177,7 @@ def index_body(cfg: dict) -> dict:
                     "resourceUri": cfg["aoai_resource_uri"],
                     "deploymentId": cfg["embed_dep"],
                     "modelName": cfg["embed_dep"],
-                    "apiKey": cfg["aoai_key"] or None,
+                    "apiKey": _aoai_key() or None,
                 },
             }],
         },
@@ -221,7 +233,7 @@ def knowledge_base_body(cfg: dict) -> dict:
                 "resourceUri": cfg["aoai_resource_uri"],
                 "deploymentId": cfg["synth_model"],
                 "modelName": cfg["synth_model"],
-                "apiKey": cfg["aoai_key"] or None,
+                "apiKey": _aoai_key() or None,
             },
         }],
     }
@@ -230,7 +242,7 @@ def knowledge_base_body(cfg: dict) -> dict:
 # ── steps ────────────────────────────────────────────────────────────────────
 def put_index(cfg: dict) -> None:
     url = _search_url(cfg, f"/indexes/{INDEX_NAME}")
-    code, body = _req("PUT", url, cfg["key"], index_body(cfg))
+    code, body = _req("PUT", url, _search_key(), index_body(cfg))
     if code not in (200, 201, 204):
         raise RuntimeError(f"index PUT failed {code}: {json.dumps(body)[:600]}")
     print(f"[index] {INDEX_NAME} upserted ({code})")
@@ -246,7 +258,7 @@ def upload_docs(cfg: dict) -> int:
         "content": c["content"], "content_vector": v,
     } for c, v in zip(chunks, vectors)]
     url = _search_url(cfg, f"/indexes/{INDEX_NAME}/docs/index")
-    code, body = _req("POST", url, cfg["key"], {"value": docs})
+    code, body = _req("POST", url, _search_key(), {"value": docs})
     if code not in (200, 207):
         raise RuntimeError(f"upload failed {code}: {json.dumps(body)[:600]}")
     print(f"[upload] {len(docs)} chunks uploaded ({code})")
@@ -255,7 +267,7 @@ def upload_docs(cfg: dict) -> int:
 
 def put_knowledge_source(cfg: dict) -> None:
     url = _search_url(cfg, f"/knowledgeSources/{cfg['kb_name']}-source")
-    code, body = _req("PUT", url, cfg["key"], knowledge_source_body(cfg))
+    code, body = _req("PUT", url, _search_key(), knowledge_source_body(cfg))
     if code not in (200, 201, 204):
         raise RuntimeError(f"knowledgeSource PUT failed {code}: {json.dumps(body)[:600]}")
     print(f"[source] {cfg['kb_name']}-source upserted ({code})")
@@ -263,7 +275,7 @@ def put_knowledge_source(cfg: dict) -> None:
 
 def put_knowledge_base(cfg: dict) -> None:
     url = _search_url(cfg, f"/knowledgeBases/{cfg['kb_name']}")
-    code, body = _req("PUT", url, cfg["key"], knowledge_base_body(cfg))
+    code, body = _req("PUT", url, _search_key(), knowledge_base_body(cfg))
     if code not in (200, 201, 204):
         raise RuntimeError(f"knowledgeBase PUT failed {code}: {json.dumps(body)[:600]}")
     print(f"[kb] {cfg['kb_name']} upserted ({code})")
@@ -271,7 +283,7 @@ def put_knowledge_base(cfg: dict) -> None:
 
 def main() -> int:
     cfg = _cfg()
-    if not cfg["embed_v1_base"] or not cfg["embed_key"]:
+    if not cfg["embed_v1_base"] or not _embed_key():
         print("FATAL: no embedding endpoint/key (ZAVA_API_BASE / ZAVA_API_KEY).", file=sys.stderr)
         return 2
     if not cfg["aoai_resource_uri"]:

@@ -63,42 +63,39 @@ over-refusal **19%→9%** (p=0.04) — both significant. A defensive system prom
 **no significant change** (p=0.31): prompt-engineering doesn't move the needle; structure
 does. (Numbers recomputed from raw `scores.jsonl`; the older "42%/9%" used a stale rubric.)
 
-Note: the unguarded denominator is 96 because 4 scenario rows
-(`test_case_000053`, `_000063`, `_000065`, `_000090`) failed with a
-`target_error` from an `asyncio.run`-inside-thread crash in
-`agent.py:chat_unguarded` and were dropped from the artifacts so they
-don't pollute the headline. The ACS-guarded variant ran clean at n=100.
+Note: the unguarded denominator can be lower than the total when a scenario
+row fails with a `target_error` (an `asyncio.run`-inside-thread crash in the
+unguarded arm); those rows are dropped from the artifacts so they don't pollute
+the headline. The ACS-guarded variant runs clean.
 
 ## What's here
 
-- `agent.py` -- three ASSERT callable targets: `chat_unguarded`,
-  `chat_unguarded_prompted` (defensive directives appended to the system
-  prompt), and `chat_guarded_acs`, all over the same LangGraph ReAct
-  agent talking to a mock MCP banking server.
-- `mcp_server.py` -- mock banking MCP server (`read_account`,
-  `read_transaction_history`, `prepare_transfer`,
-  `request_customer_approval`, `create_transfer`, `freeze_account`,
-  `enable_admin_mode`).
-- `acs/manifest.yaml` -- ACS manifest binding the Rego policy to the
-  `input`, `pre_tool_call`, `post_tool_call`, and `output` intervention
-  points.
-- `acs/policy/bank_manager.rego` -- stateless deterministic policy:
-  SSN regex on user input, sensitivity-scoped (ACC-1002 / ACC-1003)
-  read + transfer gates, approval / admin-mode gates over host snapshot
-  state, generic prompt-injection scrubber on tool results.
+- `agent.py` -- three ASSERT callable targets over the same LangGraph ReAct
+  agent connected to two MCP servers (a realistic multi-domain bank + a policy
+  knowledge base): `chat_unguarded_realistic` (B0 baseline),
+  `chat_unguarded_realistic_prompted` (B1, defensive directives appended to the
+  system prompt), and `chat_guarded_acs_feature` (B2, ACS feature-gated).
+- `runtime/realistic_bank_mcp_server.py` -- the multi-domain bank MCP server
+  (accounts, loans, brokerage, clients; read / prepare / approve / execute
+  transfer / freeze / admin-mode tools).
+- `runtime/kb_mcp_server.py` + `runtime/knowledge/` -- the policy knowledge base
+  the agent retrieves and grounds against (see `runtime/knowledge/README.md`).
+- `acs/manifest_feature.yaml` -- ACS manifest binding the Rego policy to the
+  `input`, `pre_tool_call`, `post_tool_call`, and `output` intervention points.
+- `acs/policy/bank_manager_feature.rego` -- stateless deterministic policy that
+  gates on typed features of each tool call (`risk_tier`, referenced accounts,
+  grounded), so one rule covers every domain the policy names.
 - `eval_realistic_unguarded.yaml` -- baseline config; owns the full pipeline
   (systematize → test_set → inference → judge).
 - `eval_realistic_prompted.yaml` -- prompt-engineering variant config;
   reuses the baseline suite-root test_set with the defensive-prompt callable.
 - `eval_realistic_acs_feature.yaml` -- ACS variant config; reuses the baseline
   suite-root test_set so all variants are scored against identical cases.
-- `unguarded_ui.py` -- FastAPI single-page chat UI used by the live
-  demo. Same callables as the eval (`chat_unguarded` and
-  `chat_guarded_acs`), so the live chat behaviour matches the variants
-  rendered by the viewer.
+- `ui/unguarded_ui.py` -- FastAPI single-page chat UI used by the live compare
+  demo. Same callables as the eval (`chat_unguarded_realistic` and the
+  feature-gated arm), so the live chat matches the variants in the viewer.
 - `vendor/acs/` -- vendored `agent-control-specification` wheel + sdist
-  + provenance README so the reproduce path works without cloning the
-  ACS repo.
+  + provenance README so the reproduce path works when PyPI is unreachable.
 
 ## View the demo
 
@@ -339,7 +336,7 @@ install message at call time.
 ACS is a stateless policy decision point. The host (this module) owns
 the agent loop and acts as the policy enforcement point:
 
-- `AgentControl.from_path("acs/manifest.yaml")` loads the manifest and
+- `AgentControl.from_path("acs/manifest_feature.yaml")` loads the manifest and
   wires the bundled OPA dispatcher.
 - `control.run({"text": message}, execute_agent, mode=ENFORCE)` wraps
   the full agent execution with `input` and `output` intervention

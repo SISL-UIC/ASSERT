@@ -9,8 +9,8 @@ metadata:
 # signal); only the deterministic cross-call invariants (sensitive-source
 # approval, admin elevation) run at pre_tool_call from the host snapshot.
 #
-# Both bank_manager.rego (text) and bank_manager_feature.rego (feature) live in
-# ./policy under different packages; this manifest selects the feature package.
+# This manifest selects the feature package: bank_manager_feature.rego, which
+# gates on typed features (risk_tier / referenced accounts / grounded).
 
 policies:
   bank_manager_feature:

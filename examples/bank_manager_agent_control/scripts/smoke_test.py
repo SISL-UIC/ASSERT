@@ -16,8 +16,10 @@ import sys
 import traceback
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE))  # allow sibling imports when run as a script
+HERE = Path(__file__).resolve().parent          # scripts/
+EXAMPLE = HERE.parent                           # the example root
+RUNTIME = EXAMPLE / "runtime"                    # engine modules + knowledge corpus
+sys.path.insert(0, str(RUNTIME))  # allow sibling imports (kb_backend, feature_policy, …)
 
 _passed, _failed, _skipped = 0, 0, 0
 
@@ -48,7 +50,7 @@ def skip(name, why):
 # ---------------------------------------------------------------------------
 def offline_tests():
     os.environ.setdefault("KB_BACKEND", "mock")
-    os.environ["KB_CORPUS_DIR"] = str(HERE / "knowledge")
+    os.environ["KB_CORPUS_DIR"] = str(RUNTIME / "knowledge")
     from kb_backend import MockKBBackend, get_backend
 
     be = get_backend()
@@ -112,8 +114,8 @@ def offline_feature_policy_tests():
         assert snap["transfer_approved"] is False
 
     def acs_feature_artifacts_present():
-        pol = HERE / "acs" / "policy" / "bank_manager_feature.rego"
-        man = HERE / "acs" / "manifest_feature.yaml"
+        pol = EXAMPLE / "acs" / "policy" / "bank_manager_feature.rego"
+        man = EXAMPLE / "acs" / "manifest_feature.yaml"
         assert pol.exists(), "feature Rego policy missing"
         assert man.exists(), "feature manifest missing"
         body = pol.read_text()
@@ -148,7 +150,7 @@ def deps_tests():
 
     def kb_server_builds():
         os.environ.setdefault("KB_BACKEND", "mock")
-        os.environ["KB_CORPUS_DIR"] = str(HERE / "knowledge")
+        os.environ["KB_CORPUS_DIR"] = str(RUNTIME / "knowledge")
         import kb_mcp_server as kb
         assert kb.make_server() is not None
 
@@ -164,8 +166,8 @@ def deps_tests():
         globals()["_passed"] += 1
 
         def feature_callables_present():
-            for name in ("chat_unguarded", "chat_unguarded_prompted", "chat_guarded_acs",
-                         "chat_unguarded_realistic", "chat_guarded_acs_feature"):
+            for name in ("chat_unguarded_realistic", "chat_unguarded_realistic_prompted",
+                         "chat_guarded_acs_feature"):
                 assert callable(getattr(agent, name)), f"missing callable {name}"
             assert agent.MCP_SERVER_BANK.exists() and agent.MCP_SERVER_KB.exists()
             assert agent.ACS_MANIFEST_FEATURE.exists()
