@@ -141,11 +141,18 @@ class DecideTest(unittest.TestCase):
             {f"s{i}": (1 if i < 40 else 0) for i in range(100)},
         )
         report = rd.decide(baseline, treatment, test_set_size=200)
-        # overrefusal_rate is auxiliary, so it should NOT block — only warn.
-        self.assertEqual(report["decision"]["decision"], rd.DECISION_PASS)
-        # But the comparison should still be reported.
+        self.assertEqual(report["decision"]["decision"], rd.DECISION_BLOCK)
         cmp_ = next(r for r in report["results"] if r["metric_name"] == "overrefusal_rate")
         self.assertEqual(cmp_["effect"], rd.EFFECT_DEGRADED)
+
+    def test_policy_violation_increase_blocks(self) -> None:
+        baseline, treatment = _build_baseline_treatment_pair(
+            pv_baseline=0.0,
+            pv_treatment=0.5,
+            n=100,
+        )
+        report = rd.decide(baseline, treatment, test_set_size=100)
+        self.assertEqual(report["decision"]["decision"], rd.DECISION_BLOCK)
 
     def test_too_few_samples_warns(self) -> None:
         baseline, treatment = _build_baseline_treatment_pair(n=5)
@@ -156,20 +163,24 @@ class DecideTest(unittest.TestCase):
             if r["granularity"] == "per_test_case_binary":
                 self.assertEqual(r["effect"], rd.EFFECT_TOO_FEW)
 
-    def test_judge_failure_rate_explosion_warns_not_blocks(self) -> None:
-        # judge_failure_rate is auxiliary; even with strong significance,
-        # decision must not BLOCK on it alone.
+    def test_judge_failure_rate_explosion_blocks(self) -> None:
         baseline, treatment = _build_baseline_treatment_pair(n=100)
         treatment["judge_failure_rate"] = _per_test_case(
             "judge_failure_rate",
             {f"s{i}": (1 if i < 50 else 0) for i in range(100)},
         )
         report = rd.decide(baseline, treatment, test_set_size=200)
-        self.assertNotEqual(report["decision"]["decision"], rd.DECISION_BLOCK)
+        self.assertEqual(report["decision"]["decision"], rd.DECISION_BLOCK)
+
+    def test_dataset_level_regression_warns(self) -> None:
+        baseline, treatment = _build_baseline_treatment_pair(n=100)
+        treatment["construct_coverage"] = _suite("construct_coverage", 0.5)
+        report = rd.decide(baseline, treatment, test_set_size=100)
+        self.assertEqual(report["decision"]["decision"], rd.DECISION_WARN)
 
     def test_holm_protects_against_one_off(self) -> None:
         # 1 metric drifts borderline (p~=0.04) but Holm with alpha=0.01 over
-        # 6 canonical metrics requires p<=0.00167 for the smallest. Should
+        # 4 canonical paired metrics requires p<=0.0025 for the smallest. Should
         # NOT block.
         baseline, treatment = _build_baseline_treatment_pair(n=100)
         # 8 baseline=1/treatment=0 vs 0 baseline=0/treatment=1 → p~0.004
@@ -201,6 +212,26 @@ class CompareApiTest(unittest.TestCase):
         self.assertEqual(cmp_.n_pairs, 4)
         self.assertEqual(cmp_.test, "mcnemar")
 
+    def test_uses_common_pairs_for_rates_and_direction(self) -> None:
+        baseline_values = {f"common-{i}": 1 for i in range(20)}
+        baseline_values.update({f"baseline-only-{i}": 0 for i in range(80)})
+        treatment_values = {f"common-{i}": 0 for i in range(20)}
+        treatment_values.update({f"treatment-only-{i}": 1 for i in range(80)})
+
+        cmp_ = rd.compare_per_test_case_binary(
+            "signal_rate",
+            _per_test_case("signal_rate", baseline_values),
+            _per_test_case("signal_rate", treatment_values),
+            direction="higher_is_better",
+            alpha=0.01,
+            mde=0.05,
+        )
+
+        self.assertEqual(cmp_.baseline_value, 1.0)
+        self.assertEqual(cmp_.treatment_value, 0.0)
+        self.assertEqual(cmp_.mean_diff, -1.0)
+        self.assertEqual(cmp_.effect, rd.EFFECT_DEGRADED)
+
 
 class CompareDatasetLevelTest(unittest.TestCase):
     """Tests for the MDE-threshold dataset-level comparison."""
@@ -211,7 +242,6 @@ class CompareDatasetLevelTest(unittest.TestCase):
         treatment_value: float,
         *,
         direction: str | None = "higher_is_better",
-        alpha: float = 0.05,
         mde: float = 0.1,
         n_pairs: int = 50,
     ) -> rd.MetricComparison:
@@ -220,7 +250,6 @@ class CompareDatasetLevelTest(unittest.TestCase):
             _suite("metric", baseline_value),
             _suite("metric", treatment_value),
             direction=direction,
-            alpha=alpha,
             mde=mde,
             n_pairs=n_pairs,
         )
@@ -228,18 +257,17 @@ class CompareDatasetLevelTest(unittest.TestCase):
     def test_no_regression_within_mde(self) -> None:
         cmp_ = self._compare(0.80, 0.75, mde=0.1)
         self.assertEqual(cmp_.test, "mde_threshold")
-        self.assertEqual(cmp_.p_value, 0.5)
+        self.assertIsNone(cmp_.p_value)
         self.assertEqual(cmp_.effect, "Inconclusive")
 
     def test_regression_exceeds_mde(self) -> None:
-        # p_value=0.05 needs alpha>0.05 for strict '<' in _classify_effect.
-        cmp_ = self._compare(0.80, 0.60, mde=0.1, alpha=0.10)
-        self.assertEqual(cmp_.p_value, 0.05)
+        cmp_ = self._compare(0.80, 0.60, mde=0.1)
+        self.assertIsNone(cmp_.p_value)
         self.assertEqual(cmp_.effect, "Degraded")
 
     def test_improvement_exceeds_mde(self) -> None:
-        cmp_ = self._compare(0.60, 0.80, mde=0.1, alpha=0.10)
-        self.assertEqual(cmp_.p_value, 0.05)
+        cmp_ = self._compare(0.60, 0.80, mde=0.1)
+        self.assertIsNone(cmp_.p_value)
         self.assertEqual(cmp_.effect, "Improved")
 
     def test_no_direction_returns_info(self) -> None:

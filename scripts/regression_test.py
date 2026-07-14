@@ -3,23 +3,21 @@
 Runs the pipeline at the baseline + treatment commits against the two
 golden failure-mode configs (``tests/regression/config_{safety,quality}.yaml``) with
 a shared test-set size, computes the science-efficacy metrics, runs paired
-statistical tests (McNemar for per-test-case binary, bootstrap delta for
+statistical tests (McNemar for per-test-case binary, MDE thresholds for
 dataset-level), and emits a Holm-Bonferroni-gated decision report consumed
 by the ``science.yml`` workflow's PR summary step.
 
 Determinism contract
 --------------------
-Stages ``systematize``, ``stratification``, ``test_set`` are FROZEN across baseline +
-treatment unless the diff shows a file that affects those stages. This
-keeps the comparison a true paired-by-test-case-id comparison of inference +
-judge changes. Set ``--rerun-upstream-stages`` to force regeneration on
-both commits (e.g. for prompt-tuning PRs).
+The baseline generates taxonomy and test-set artifacts once. Those exact files
+are copied into the treatment worktree, where upstream stages are disabled.
+This keeps inference and judge comparisons paired by identical test-case IDs
+and content.
 
 Caching
 -------
-Baseline runs are cached by ``(base_sha, config_hash, judge_model,
-test_set_size, script_hash)``. PRs against the same base commit reuse the
-cached baseline inference outputs/scores; only the treatment is re-run.
+Baseline runs are cached by ``(base_sha, config_hash, models, test_set_size)``.
+Treatment outputs are always rerun and are never included in the workflow cache.
 
 Output
 ------
@@ -39,8 +37,9 @@ import os
 import shutil
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 import yaml
 
@@ -67,17 +66,21 @@ DEFAULT_CONFIGS: tuple[Path, ...] = (
     REPO_ROOT / "tests" / "regression" / "config_quality.yaml",
 )
 
-# Files whose change requires rerunning upstream (cacheable) stages.
-UPSTREAM_STAGE_FILES: tuple[str, ...] = (
-    "assert_ai/stages/systematize.py",
-    "assert_ai/stages/stratification.py",
-    "assert_ai/stages/test_set.py",
-    "assert_ai/core/artifact_cache.py",
-    "assert_ai/internal_pipeline_prompts/systematize_system.md",
-    "assert_ai/internal_pipeline_prompts/test_set_direct_single.md",
-    "assert_ai/internal_pipeline_prompts/test_set_scenario_single.md",
-    "assert_ai/internal_pipeline_prompts/test_set_stratification.md",
+SHARED_UPSTREAM_FILES: tuple[str, ...] = (
+    "taxonomy.json",
+    "systematization.json",
+    "test_set.jsonl",
+    "stratification.json",
 )
+REQUIRED_SHARED_UPSTREAM_FILES: tuple[str, ...] = ("taxonomy.json", "test_set.jsonl")
+DEFAULT_BASELINE_CACHE_DIR = Path("artifacts/regression-baselines")
+TREATMENT_RESULTS_DIR = Path("artifacts/regression-runs")
+
+
+@dataclass(frozen=True)
+class PipelineArtifacts:
+    suite_dir: Path
+    run_dir: Path
 
 
 # ── CLI ────────────────────────────────────────────────────────────────────
@@ -108,13 +111,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument(
         "--baseline-cache-dir",
         type=Path,
-        default=None,
-        help="If set, reuse cached baseline scores instead of rerunning",
-    )
-    p.add_argument(
-        "--rerun-upstream-stages",
-        action="store_true",
-        help="Force rerunning systematize/stratification/test_set on both commits",
+        default=DEFAULT_BASELINE_CACHE_DIR,
+        help="Directory used for reusable baseline runs and shared test sets",
     )
     p.add_argument(
         "--enforce",
@@ -142,49 +140,51 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "/ structured-output handling, dropping payloads silently."
         ),
     )
-    p.add_argument(
-        "--alpha-canonical-only", action="store_true", default=True,
-        help="Apply Holm-Bonferroni only over the 6 canonical metrics (default)",
-    )
     return p.parse_args(argv)
-
-
-# ── Change detection ───────────────────────────────────────────────────────
-
-
-def changed_files(baseline: str, treatment: str) -> list[str]:
-    try:
-        out = subprocess.check_output(
-            ["git", "diff", "--name-only", f"{baseline}..{treatment}"],
-            cwd=REPO_ROOT,
-            text=True,
-        )
-        return [line.strip() for line in out.splitlines() if line.strip()]
-    except subprocess.CalledProcessError as exc:
-        log.warning("git diff failed (%s); assuming all stages affected", exc)
-        return ["__assume_all__"]
-
-
-def upstream_stages_dirty(files: list[str]) -> bool:
-    if "__assume_all__" in files:
-        return True
-    return any(f in UPSTREAM_STAGE_FILES for f in files)
 
 
 # ── Pipeline runner ────────────────────────────────────────────────────────
 
 
-def _config_hash(path: Path, *, test_set_size: int, judge_model: str) -> str:
+def _config_hash(
+    path: Path,
+    *,
+    test_set_size: int,
+    judge_model: str,
+    upstream_model: str,
+) -> str:
     h = hashlib.sha256()
     h.update(path.read_bytes())
-    h.update(f"\ntest_set={test_set_size}\njudge={judge_model}\n".encode())
+    h.update(
+        (
+            f"\ntest_set={test_set_size}\njudge={judge_model}"
+            f"\nupstream={upstream_model}\n"
+        ).encode()
+    )
     return h.hexdigest()[:16]
 
 
-def _suite_dir_for(config: Path, commit_sha: str, test_set_size: int, judge_model: str) -> Path:
-    cfg_hash = _config_hash(config, test_set_size=test_set_size, judge_model=judge_model)
+def _resolve_storage_root(path: Path) -> Path:
+    expanded = path.expanduser()
+    return expanded if expanded.is_absolute() else REPO_ROOT / expanded
+
+
+def _suite_dir_for(
+    storage_root: Path,
+    config: Path,
+    commit_sha: str,
+    test_set_size: int,
+    judge_model: str,
+    upstream_model: str,
+) -> Path:
+    cfg_hash = _config_hash(
+        config,
+        test_set_size=test_set_size,
+        judge_model=judge_model,
+        upstream_model=upstream_model,
+    )
     label = config.stem  # "config_safety" / "config_quality"
-    return REPO_ROOT / "artifacts" / "regression-runs" / f"{label}-{commit_sha[:7]}-{cfg_hash}"
+    return _resolve_storage_root(storage_root) / f"{label}-{commit_sha[:7]}-{cfg_hash}"
 
 
 def _worktree_path_for(commit_sha: str) -> Path:
@@ -192,7 +192,7 @@ def _worktree_path_for(commit_sha: str) -> Path:
 
 
 def ensure_worktree(commit_sha: str) -> Path:
-    """Create (or reuse) a git worktree pinned at ``commit_sha``.
+    """Create a clean detached worktree pinned at ``commit_sha``.
 
     Worktrees let baseline + treatment runs use the actual file tree of
     each commit (including ``assert_ai/`` source, packaged prompts, configs) without
@@ -201,51 +201,15 @@ def ensure_worktree(commit_sha: str) -> Path:
     """
     wt = _worktree_path_for(commit_sha)
     if wt.exists():
-        log.info("reusing worktree at %s", wt)
-        _apply_test_set_diagnostic(wt)
-        return wt
+        log.info("removing stale worktree at %s", wt)
+        remove_worktree(commit_sha)
     wt.parent.mkdir(parents=True, exist_ok=True)
     log.info("creating worktree for %s at %s", commit_sha[:7], wt)
     subprocess.check_call(
         ["git", "worktree", "add", "--detach", str(wt), commit_sha],
         cwd=REPO_ROOT,
     )
-    _apply_test_set_diagnostic(wt)
     return wt
-
-
-def _apply_test_set_diagnostic(worktree: Path) -> None:
-    """Patch ``assert_ai/stages/test_set.py`` to print invalid response details."""
-    target = worktree / "assert_ai" / "stages" / "test_set.py"
-    if not target.exists():
-        return
-    try:
-        text = target.read_text(encoding="utf-8")
-    except OSError:
-        return
-    if "[DEBUG TEST_SET-FAIL]" in text:
-        return
-    sentinel = (
-        '            if not isinstance(payload, dict) or not isinstance(payload.get("test_set"), list):\n'
-        '                raise ValueError(f"{kind} test-case generation returned invalid test_set payload")\n'
-    )
-    if sentinel not in text:
-        log.warning("test_set diagnostic sentinel not found in %s; skipping patch", target)
-        return
-    replacement = (
-        '            if not isinstance(payload, dict) or not isinstance(payload.get("test_set"), list):\n'
-        '                print(f"\\n[DEBUG TEST_SET-FAIL] kind={kind} behavior={behavior_name}", flush=True)\n'
-        '                print(f"[DEBUG TEST_SET-FAIL] finish_reason={response.finish_reason}", flush=True)\n'
-        '                print(f"[DEBUG TEST_SET-FAIL] status={response.status}", flush=True)\n'
-        '                print(f"[DEBUG TEST_SET-FAIL] incomplete={response.incomplete_details}", flush=True)\n'
-        '                print(f"[DEBUG TEST_SET-FAIL] usage={response.usage}", flush=True)\n'
-        '                print(f"[DEBUG TEST_SET-FAIL] text_len={len(response.text or \'\')}", flush=True)\n'
-        '                print(f"[DEBUG TEST_SET-FAIL] text[:1500]={(response.text or \'\')[:1500]!r}", flush=True)\n'
-        '                print(f"[DEBUG TEST_SET-FAIL] parsed_type={type(payload).__name__}", flush=True)\n'
-        '                raise ValueError(f"{kind} test-case generation returned invalid test_set payload")\n'
-    )
-    target.write_text(text.replace(sentinel, replacement, 1), encoding="utf-8")
-    log.info("applied test_set diagnostic to %s", target)
 
 
 def remove_worktree(commit_sha: str) -> None:
@@ -272,6 +236,7 @@ def _render_config(
     judge_model: str,
     upstream_model: str,
     target_dir: Path,
+    freeze_upstream: bool = False,
 ) -> Path:
     """Materialise a per-run YAML with the requested overrides.
 
@@ -293,12 +258,9 @@ def _render_config(
     cfg["run"] = run_label
 
     pipeline = cfg.setdefault("pipeline", {})
-    test_set_key = "test_set" if "test_set" in pipeline or "seeds" not in pipeline else "seeds"
-    systematize_key = "systematize" if "systematize" in pipeline or "policy" not in pipeline else "policy"
-    inference_key = "inference" if "inference" in pipeline or "rollout" not in pipeline else "rollout"
 
     # Sample sizes
-    test_set_cfg = pipeline.setdefault(test_set_key, {})
+    test_set_cfg = pipeline.setdefault("test_set", {})
     half = test_set_size // 2
     test_set_cfg.setdefault("prompt", {})["sample_size"] = half
     test_set_cfg.setdefault("scenario", {})["sample_size"] = test_set_size - half
@@ -312,18 +274,19 @@ def _render_config(
     # test cases with rich descriptions. The project default
     # (DEFAULT_GENERATION_MAX_TOKENS=3000) truncates these, leaving an
     # incomplete JSON that fails to parse → "invalid test_set payload".
-    pipeline.setdefault(systematize_key, {}).setdefault("model", {})["name"] = upstream_model
+    pipeline.setdefault("systematize", {}).setdefault("model", {})["name"] = upstream_model
     prompt_model = test_set_cfg.setdefault("prompt", {}).setdefault("model", {})
     prompt_model["name"] = upstream_model
     prompt_model["max_tokens"] = 16000
     scenario_model = test_set_cfg.setdefault("scenario", {}).setdefault("model", {})
     scenario_model["name"] = upstream_model
     scenario_model["max_tokens"] = 16000
-    inference = pipeline.setdefault(inference_key, {})
-    tester_key = "tester" if inference_key == "inference" or "auditor" not in inference else "auditor"
-    inference.setdefault(tester_key, {}).setdefault("model", {})["name"] = upstream_model
+    if freeze_upstream:
+        pipeline.setdefault("systematize", {})["enabled"] = False
+        test_set_cfg["enabled"] = False
+    inference = pipeline.setdefault("inference", {})
+    inference.setdefault("tester", {}).setdefault("model", {})["name"] = upstream_model
     # Bump inference concurrency so test_set=200 finishes in workflow timeout.
-    # qualevalexpeus has generous Azure quota for these deployments.
     inference["concurrency"] = max(int(inference.get("concurrency", 2) or 2), 10)
 
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -339,25 +302,37 @@ def run_pipeline(
     test_set_size: int,
     judge_model: str,
     upstream_model: str,
-    extra_overrides: dict[str, Any] | None = None,
-) -> Path:
+    storage_root: Path,
+    reuse_existing: bool,
+    frozen_upstream_dir: Path | None = None,
+) -> PipelineArtifacts:
     """Run ``assert-ai run`` against one config from a worktree at ``commit_sha``.
 
     Pipeline outputs land in ``<worktree>/artifacts/results/<suite>/<run>/``;
-    we copy the run dir to ``REPO_ROOT/artifacts/regression-runs/`` so they
-    survive worktree teardown and the workflow's actions/cache step can
-    persist them across PR runs.
+    selected suite artifacts are copied outside the worktree so they survive
+    teardown. When ``frozen_upstream_dir`` is provided, its taxonomy and test
+    set are copied into the treatment suite and upstream stages are disabled.
     """
-    suite_dir = _suite_dir_for(config, commit_sha, test_set_size, judge_model)
+    suite_dir = _suite_dir_for(
+        storage_root,
+        config,
+        commit_sha,
+        test_set_size,
+        judge_model,
+        upstream_model,
+    )
     run_label = f"reg-{commit_sha[:7]}"
     final_run_dir = suite_dir / run_label
-    if (final_run_dir / SCORES_FILE).exists():
+    has_shared_upstream = all(
+        (suite_dir / name).exists() for name in REQUIRED_SHARED_UPSTREAM_FILES
+    )
+    if reuse_existing and (final_run_dir / SCORES_FILE).exists() and has_shared_upstream:
         log.info("scores already exist for %s — skipping rerun", commit_sha[:7])
-        return final_run_dir
+        return PipelineArtifacts(suite_dir=suite_dir, run_dir=final_run_dir)
 
+    if suite_dir.exists():
+        shutil.rmtree(suite_dir)
     suite_dir.mkdir(parents=True, exist_ok=True)
-    if extra_overrides:
-        log.warning("extra_overrides not yet wired through temp YAML: %s", extra_overrides)
 
     worktree = ensure_worktree(commit_sha)
     rel = config.resolve().relative_to(REPO_ROOT)
@@ -374,7 +349,15 @@ def run_pipeline(
         # to the YAML's parent dir, so emit the temp config alongside
         # the source.
         target_dir=config_in_wt.parent,
+        freeze_upstream=frozen_upstream_dir is not None,
     )
+
+    worktree_suite_dir = worktree / "artifacts" / "results" / suite_name
+    if frozen_upstream_dir is not None:
+        _copy_shared_upstream_artifacts(
+            frozen_upstream_dir,
+            worktree_suite_dir,
+        )
 
     cmd = [
         sys.executable, "-m", "assert_ai.cli", "run",
@@ -394,17 +377,44 @@ def run_pipeline(
 
     # Copy the worktree's result dir into REPO_ROOT so it survives teardown
     # and the workflow cache layer can persist it.
-    src_run_dir = worktree / "artifacts" / "results" / suite_name / run_label
+    src_suite_dir = worktree / "artifacts" / "results" / suite_name
+    src_run_dir = src_suite_dir / run_label
     if not src_run_dir.exists():
         raise RuntimeError(
             f"pipeline did not write expected run dir at {src_run_dir}"
         )
-    if final_run_dir.exists():
-        shutil.rmtree(final_run_dir)
-    final_run_dir.parent.mkdir(parents=True, exist_ok=True)
+    _copy_shared_upstream_artifacts(src_suite_dir, suite_dir)
     shutil.copytree(src_run_dir, final_run_dir)
     log.info("copied %s -> %s", src_run_dir, final_run_dir)
-    return final_run_dir
+    return PipelineArtifacts(suite_dir=suite_dir, run_dir=final_run_dir)
+
+
+def _copy_shared_upstream_artifacts(source: Path, destination: Path) -> None:
+    missing = [
+        name for name in REQUIRED_SHARED_UPSTREAM_FILES if not (source / name).exists()
+    ]
+    if missing:
+        raise RuntimeError(
+            f"shared upstream artifacts missing from {source}: {', '.join(missing)}"
+        )
+    destination.mkdir(parents=True, exist_ok=True)
+    for name in SHARED_UPSTREAM_FILES:
+        src = source / name
+        if src.exists():
+            shutil.copy2(src, destination / name)
+
+
+def _assert_shared_upstream_identical(baseline_suite: Path, treatment_suite: Path) -> None:
+    for name in REQUIRED_SHARED_UPSTREAM_FILES:
+        baseline_path = baseline_suite / name
+        treatment_path = treatment_suite / name
+        baseline_hash = hashlib.sha256(baseline_path.read_bytes()).hexdigest()
+        treatment_hash = hashlib.sha256(treatment_path.read_bytes()).hexdigest()
+        if baseline_hash != treatment_hash:
+            raise RuntimeError(
+                f"paired comparison requires identical {name}; "
+                f"baseline={baseline_hash[:12]} treatment={treatment_hash[:12]}"
+            )
 
 
 def _scores_for(run_dir: Path) -> list[dict[str, Any]]:
@@ -415,12 +425,72 @@ def _scores_for(run_dir: Path) -> list[dict[str, Any]]:
     return list(load_jsonl(scores_path))
 
 
-def _policy_for(run_dir: Path) -> dict[str, Any] | None:
-    for candidate in ("policy.json", "taxonomy.json"):
-        path = run_dir / candidate
-        if path.exists():
-            return json.loads(path.read_text(encoding="utf-8"))
-    return None
+def _paired_test_case_count(
+    baseline_rows: list[dict[str, Any]],
+    treatment_rows: list[dict[str, Any]],
+) -> int:
+    def ids(rows: list[dict[str, Any]]) -> set[str]:
+        return {
+            str(row.get("test_case_id") or row.get("id"))
+            for row in rows
+            if row.get("test_case_id") is not None or row.get("id") is not None
+        }
+
+    return len(ids(baseline_rows) & ids(treatment_rows))
+
+
+def _policy_for(suite_dir: Path) -> dict[str, Any] | None:
+    path = suite_dir / "taxonomy.json"
+    if not path.exists():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _combine_config_reports(
+    per_config: dict[str, dict[str, Any]],
+    *,
+    alpha: float,
+    test_set_size: int,
+) -> dict[str, Any]:
+    decision_rank = {"PASS": 0, "WARN": 1, "BLOCK": 2}
+    overall_decision = "PASS"
+    reasons: list[str] = []
+    results: list[dict[str, Any]] = []
+    baseline_metrics: dict[str, Any] = {}
+    treatment_metrics: dict[str, Any] = {}
+
+    for config_name, payload in per_config.items():
+        config_report = payload["report"]
+        config_decision = config_report["decision"]["decision"]
+        if decision_rank[config_decision] > decision_rank[overall_decision]:
+            overall_decision = config_decision
+        if config_decision != "PASS":
+            reasons.extend(
+                f"{config_name}: {reason}"
+                for reason in config_report["decision"]["reasons"]
+            )
+        for result in config_report["results"]:
+            results.append({"config": config_name, **result})
+        baseline_metrics[config_name] = config_report["baseline_metrics"]
+        treatment_metrics[config_name] = config_report["treatment_metrics"]
+
+    if not reasons:
+        reasons.append("No config showed a canonical metric regression beyond its threshold.")
+
+    return {
+        "schema_version": 2,
+        "alpha": alpha,
+        "test_set_size": test_set_size,
+        "paired_test_set_source": "baseline",
+        "results": results,
+        "baseline_metrics": baseline_metrics,
+        "treatment_metrics": treatment_metrics,
+        "per_config": per_config,
+        "decision": {
+            "decision": overall_decision,
+            "reasons": reasons,
+        },
+    }
 
 
 # ── Reporting ──────────────────────────────────────────────────────────────
@@ -447,11 +517,12 @@ def render_markdown(report: dict[str, Any]) -> str:
         f"alpha (per-test) = {report['alpha']}, test_set_size = {report.get('test_set_size')}"
     )
     lines.append("")
-    lines.append("| Metric | Granularity | Direction | Baseline | Treatment | Δ | p | Effect |")
-    lines.append("|---|---|---|---|---|---|---|---|")
+    lines.append("| Config | Metric | Granularity | Direction | Baseline | Treatment | Δ | p | Effect |")
+    lines.append("|---|---|---|---|---|---|---|---|---|")
     for r in report["results"]:
         lines.append(
-            f"| {r['metric_name']} | {r['granularity']} | {r['direction'] or '—'} | "
+            f"| {r['config']} | {r['metric_name']} | {r['granularity']} | "
+            f"{r['direction'] or '—'} | "
             f"{_fmt(r['baseline_value'])} | {_fmt(r['treatment_value'])} | "
             f"{_fmt(r['mean_diff'])} | {_fmt(r['p_value'])} | "
             f"{_ICONS.get(r['effect'], '?')} {r['effect']} |"
@@ -479,67 +550,84 @@ def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     args.artifacts_dir.mkdir(parents=True, exist_ok=True)
 
-    files = changed_files(args.baseline, args.treatment)
-    rerun_upstream = args.rerun_upstream_stages or upstream_stages_dirty(files)
-    log.info(
-        "changed files=%d, upstream stages dirty=%s, rerun_upstream=%s",
-        len(files), upstream_stages_dirty(files), rerun_upstream,
-    )
-
     per_config_results: dict[str, dict[str, Any]] = {}
-    aggregated_baseline: list[dict[str, Any]] = []
-    aggregated_treatment: list[dict[str, Any]] = []
-    policy_for_metrics: dict[str, Any] | None = None
+    baseline_by_config: dict[Path, PipelineArtifacts] = {}
     worktrees_created: set[str] = set()
 
     try:
         for config in args.configs:
-            log.info("=== config: %s ===", config.name)
+            log.info("=== baseline config: %s ===", config.name)
             worktrees_created.add(args.baseline)
-            baseline_dir = run_pipeline(
+            baseline_by_config[config] = run_pipeline(
                 config,
                 commit_sha=args.baseline,
                 test_set_size=args.test_set,
                 judge_model=args.judge_model,
                 upstream_model=args.upstream_model,
+                storage_root=args.baseline_cache_dir,
+                reuse_existing=True,
             )
+
+        baseline_cache_root = _resolve_storage_root(args.baseline_cache_dir)
+        baseline_cache_root.mkdir(parents=True, exist_ok=True)
+        (baseline_cache_root / ".complete").write_text(
+            f"{args.baseline}\n",
+            encoding="utf-8",
+        )
+
+        for config in args.configs:
+            log.info("=== treatment config: %s ===", config.name)
+            baseline_artifacts = baseline_by_config[config]
             worktrees_created.add(args.treatment)
-            treatment_dir = run_pipeline(
+            treatment_artifacts = run_pipeline(
                 config,
                 commit_sha=args.treatment,
                 test_set_size=args.test_set,
                 judge_model=args.judge_model,
                 upstream_model=args.upstream_model,
+                storage_root=TREATMENT_RESULTS_DIR,
+                reuse_existing=False,
+                frozen_upstream_dir=baseline_artifacts.suite_dir,
             )
-            baseline_rows = _scores_for(baseline_dir)
-            treatment_rows = _scores_for(treatment_dir)
-            policy = _policy_for(baseline_dir) or _policy_for(treatment_dir)
-            if policy_for_metrics is None:
-                policy_for_metrics = policy
+            baseline_rows = _scores_for(baseline_artifacts.run_dir)
+            treatment_rows = _scores_for(treatment_artifacts.run_dir)
+            _assert_shared_upstream_identical(
+                baseline_artifacts.suite_dir,
+                treatment_artifacts.suite_dir,
+            )
+            paired_count = _paired_test_case_count(baseline_rows, treatment_rows)
+            policy = _policy_for(baseline_artifacts.suite_dir)
+            if policy is None:
+                raise RuntimeError(
+                    f"baseline taxonomy missing from {baseline_artifacts.suite_dir}"
+                )
+            config_report = decide(
+                compute_all(baseline_rows, policy),
+                compute_all(treatment_rows, policy),
+                alpha=args.alpha,
+                test_set_size=paired_count,
+            )
             per_config_results[config.name] = {
-                "baseline_dir": str(baseline_dir),
-                "treatment_dir": str(treatment_dir),
+                "baseline_dir": str(baseline_artifacts.run_dir),
+                "treatment_dir": str(treatment_artifacts.run_dir),
+                "taxonomy_path": str(baseline_artifacts.suite_dir / "taxonomy.json"),
+                "test_set_path": str(baseline_artifacts.suite_dir / "test_set.jsonl"),
                 "baseline_n": len(baseline_rows),
                 "treatment_n": len(treatment_rows),
+                "paired_n": paired_count,
+                "report": config_report,
             }
-            aggregated_baseline.extend(baseline_rows)
-            aggregated_treatment.extend(treatment_rows)
     finally:
         for sha in worktrees_created:
             remove_worktree(sha)
 
-    baseline_metrics = compute_all(aggregated_baseline, policy_for_metrics)
-    treatment_metrics = compute_all(aggregated_treatment, policy_for_metrics)
-    report = decide(
-        baseline_metrics,
-        treatment_metrics,
+    report = _combine_config_reports(
+        per_config_results,
         alpha=args.alpha,
-        test_set_size=args.test_set * len(args.configs),
+        test_set_size=args.test_set,
     )
-    report["per_config"] = per_config_results
     report["baseline_sha"] = args.baseline
     report["treatment_sha"] = args.treatment
-    report["upstream_stages_rerun"] = rerun_upstream
     report["judge_model"] = args.judge_model
     report["upstream_model"] = args.upstream_model
 

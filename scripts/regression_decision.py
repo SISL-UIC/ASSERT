@@ -5,14 +5,13 @@ For each metric:
 * **Per-test-case binary** (signal_rate, policy_violation_rate, overrefusal_rate,
   judge_failure_rate) — paired McNemar's exact test on 2x2 contingency
   table over the test-case ids common to both runs.
-* **Dataset-level** (construct_coverage, separation_strength, etc.) — paired
-  bootstrap on jointly-resampled test-case ids, with BCa-corrected 95% CI on
-  the delta.
+* **Dataset-level** (construct_coverage, separation_strength, etc.) — advisory
+  minimum-detectable-effect (MDE) threshold on the observed delta.
 
 Significance is one-sided (regression-only): we only flag `Degraded` when
 treatment moved against the metric's `direction`. Family-wise correction is
-**Holm-Bonferroni over the 6 canonical metrics** in the gate; auxiliaries
-are reported but never block.
+**Holm-Bonferroni over canonical metrics with paired p-values**; dataset-level
+metrics are WARN-only until a valid resampling design is implemented.
 
 Exposes one orchestration entrypoint, ``decide``, that takes the parsed
 baseline + treatment metric maps and returns a JSON-friendly decision
@@ -22,9 +21,8 @@ record consumed by ``regression_test.py`` and the workflow summary step.
 from __future__ import annotations
 
 import math
-import random
 from dataclasses import dataclass, field
-from typing import Any, Callable, Iterable
+from typing import Any
 
 from scripts.regression_metrics import (
     AUXILIARY_METRICS,
@@ -33,7 +31,6 @@ from scripts.regression_metrics import (
     PER_TEST_CASE_BINARY,
     DATASET_LEVEL,
     MetricResult,
-    compute_all,
     metric_to_jsonable,
 )
 
@@ -54,9 +51,6 @@ DEFAULT_MDE: dict[str, float] = {
     "discrimination_power": 0.05,
     "failure_mode_count": 2.0,
 }
-
-# Bootstrap replicates for dataset-level deltas.
-DEFAULT_BOOTSTRAP = 2000
 
 # Minimum N for a metric to be eligible for hard-gate. Below this we WARN
 # rather than BLOCK regardless of the test result.
@@ -84,7 +78,7 @@ class MetricComparison:
     direction: str | None
     granularity: str
     n_pairs: int
-    test: str  # "mcnemar" | "bootstrap" | "skipped"
+    test: str  # "mcnemar" | "mde_threshold"
     p_value: float | None  # one-sided regression p-value
     ci_low: float | None  # 95% CI for delta (dataset-level only)
     ci_high: float | None
@@ -148,67 +142,6 @@ def mcnemar_one_sided(b: int, c: int, *, treatment_higher: bool) -> float:
     return _binom_sf(k, n, 0.5)
 
 
-def paired_bootstrap_ci(
-    deltas: list[float],
-    *,
-    n_resamples: int = DEFAULT_BOOTSTRAP,
-    confidence: float = 0.95,
-    rng_seed: int = 1234,
-) -> tuple[float, float, float]:
-    """Paired bootstrap on per-pair deltas.
-
-    Returns (mean_delta, ci_low, ci_high) using the percentile method on
-    means of resampled (with replacement) deltas. Deltas are assumed to be
-    paired-by-test-case-id and supplied in matched order.
-    """
-    n = len(deltas)
-    if n == 0:
-        return 0.0, 0.0, 0.0
-    mean = sum(deltas) / n
-    if n == 1:
-        return mean, mean, mean
-    rng = random.Random(rng_seed)
-    means: list[float] = []
-    for _ in range(n_resamples):
-        sample = [deltas[rng.randrange(n)] for _ in range(n)]
-        means.append(sum(sample) / n)
-    means.sort()
-    lo_idx = max(0, int(((1 - confidence) / 2) * n_resamples))
-    hi_idx = min(n_resamples - 1, int((1 - (1 - confidence) / 2) * n_resamples))
-    return mean, means[lo_idx], means[hi_idx]
-
-
-def bootstrap_delta_pvalue(
-    deltas: list[float],
-    *,
-    treatment_higher: bool,
-    n_resamples: int = DEFAULT_BOOTSTRAP,
-    rng_seed: int = 1234,
-) -> float:
-    """One-sided bootstrap p-value for mean delta.
-
-    Tests H0: mean(deltas) == 0 vs H1 in the indicated direction by
-    centering deltas at zero and resampling. Returns the proportion of
-    resamples with mean at least as extreme as the observed mean.
-    """
-    n = len(deltas)
-    if n == 0:
-        return 1.0
-    obs = sum(deltas) / n
-    centered = [d - obs for d in deltas]
-    rng = random.Random(rng_seed)
-    extreme = 0
-    for _ in range(n_resamples):
-        sample_mean = sum(centered[rng.randrange(n)] for _ in range(n)) / n
-        if treatment_higher:
-            if sample_mean >= obs:
-                extreme += 1
-        else:
-            if sample_mean <= obs:
-                extreme += 1
-    return (extreme + 1) / (n_resamples + 1)
-
-
 # ── Per-metric comparison ──────────────────────────────────────────────────
 
 
@@ -239,6 +172,24 @@ def _classify_effect(
     return EFFECT_INCONCLUSIVE
 
 
+def _classify_mde_effect(
+    *,
+    direction: str | None,
+    mean_diff: float,
+    n_pairs: int,
+    mde: float,
+) -> str:
+    if n_pairs < MIN_N_FOR_GATE:
+        return EFFECT_TOO_FEW
+    if direction is None:
+        return EFFECT_INFO
+    if abs(mean_diff) < mde:
+        return EFFECT_INCONCLUSIVE
+    if direction == "higher_is_better":
+        return EFFECT_DEGRADED if mean_diff < 0 else EFFECT_IMPROVED
+    return EFFECT_DEGRADED if mean_diff > 0 else EFFECT_IMPROVED
+
+
 def compare_per_test_case_binary(
     name: str,
     baseline: MetricResult,
@@ -251,14 +202,20 @@ def compare_per_test_case_binary(
     common = sorted(set(baseline.per_test_case) & set(treatment.per_test_case))
     n = len(common)
     b = c = 0
+    baseline_total = 0
+    treatment_total = 0
     for sid in common:
         bv = baseline.per_test_case[sid]
         tv = treatment.per_test_case[sid]
+        baseline_total += bv
+        treatment_total += tv
         if bv == 1 and tv == 0:
             b += 1
         elif bv == 0 and tv == 1:
             c += 1
-    mean_diff = treatment.value - baseline.value
+    baseline_value = baseline_total / n if n else 0.0
+    treatment_value = treatment_total / n if n else 0.0
+    mean_diff = treatment_value - baseline_value
     # One-sided McNemar in the direction of the observed effect. The
     # classifier then decides whether that direction is regression or
     # improvement based on ``direction``. This matches the standard
@@ -283,8 +240,8 @@ def compare_per_test_case_binary(
     )
     return MetricComparison(
         name=name,
-        baseline_value=baseline.value,
-        treatment_value=treatment.value,
+        baseline_value=baseline_value,
+        treatment_value=treatment_value,
         mean_diff=mean_diff,
         direction=direction,
         granularity="per_test_case_binary",
@@ -294,7 +251,12 @@ def compare_per_test_case_binary(
         ci_low=None,
         ci_high=None,
         effect=effect,
-        detail={"discordant_b": b, "discordant_c": c},
+        detail={
+            "discordant_b": b,
+            "discordant_c": c,
+            "unpaired_baseline_value": baseline.value,
+            "unpaired_treatment_value": treatment.value,
+        },
     )
 
 
@@ -304,28 +266,19 @@ def compare_dataset_level(
     treatment: MetricResult,
     *,
     direction: str | None,
-    alpha: float,
     mde: float,
     n_pairs: int,
-    n_resamples: int = DEFAULT_BOOTSTRAP,
 ) -> MetricComparison:
     """Compare a dataset-level metric.
 
-    Dataset metrics are not naturally per-test-case, so we have no per-test-case delta
-    series. We use a deterministic delta + simple z-style approximation:
-    if the absolute delta exceeds the MDE, p is placeholder-set based on
-    n_pairs (as a power signal). This keeps dataset metrics ADVISORY in v1
-    while still surfacing big swings to reviewers.
+    Dataset metrics are not naturally per-test-case, so this comparison does
+    not manufacture a p-value. It classifies observed changes against the MDE;
+    the top-level decision keeps these results advisory.
     """
     mean_diff = treatment.value - baseline.value
-    # Without per-test-case deltas, true significance requires a more complex
-    # design. For v1 we report the delta + warn-only effect classification.
-    p_value = 0.5 if abs(mean_diff) < mde else 0.05
-    effect = _classify_effect(
+    effect = _classify_mde_effect(
         direction=direction,
         mean_diff=mean_diff,
-        p_value=p_value,
-        alpha=alpha,
         n_pairs=n_pairs,
         mde=mde,
     )
@@ -338,7 +291,7 @@ def compare_dataset_level(
         granularity="dataset",
         n_pairs=n_pairs,
         test="mde_threshold",
-        p_value=p_value,
+        p_value=None,
         ci_low=None,
         ci_high=None,
         effect=effect,
@@ -385,8 +338,7 @@ def decide(
         baseline / treatment: outputs from ``compute_all``.
         alpha: per-test significance for the gate (default 0.01).
         mdes: per-metric minimum detectable effect (raw units). Falls back to ``DEFAULT_MDE``.
-        directions_override: optional per-metric direction; useful for
-            ``policy_violation_rate`` whose direction depends on target.
+        directions_override: optional per-metric direction overrides.
         test_set_size: total test-set size fed into the runs (used to size the
             dataset-level pseudo-N for power warnings).
     """
@@ -411,7 +363,6 @@ def decide(
             cmp_ = compare_dataset_level(
                 name, b, t,
                 direction=directions.get(name),
-                alpha=alpha,
                 mde=mdes[name],
                 n_pairs=n_pairs_suite,
             )
@@ -419,20 +370,26 @@ def decide(
             continue
         comparisons.append(cmp_)
 
-    # Holm-Bonferroni over the canonical 6 only (auxiliaries advisory).
+    # Holm-Bonferroni applies only where a real paired p-value exists.
     canonical_cmps = [c for c in comparisons if c.name in CANONICAL_METRICS]
-    rejected = holm_bonferroni([c.p_value or 1.0 for c in canonical_cmps], alpha)
+    holm_cmps = [c for c in canonical_cmps if c.p_value is not None]
+    rejected = holm_bonferroni([c.p_value for c in holm_cmps], alpha)
     rejected_by_name = {
-        cmp_.name: rejected[i] for i, cmp_ in enumerate(canonical_cmps)
+        cmp_.name: rejected[i] for i, cmp_ in enumerate(holm_cmps)
     }
 
     decision = DECISION_PASS
     reasons: list[str] = []
     for cmp_ in canonical_cmps:
-        if cmp_.effect == EFFECT_DEGRADED and rejected_by_name.get(cmp_.name):
-            # Hard-gate only on stable per-test-case metrics in v1; dataset-level
-            # canonical metrics are advisory until calibration confirms power.
-            if cmp_.granularity == "per_test_case_binary":
+        if cmp_.effect == EFFECT_DEGRADED:
+            if cmp_.granularity == "dataset":
+                if decision == DECISION_PASS:
+                    decision = DECISION_WARN
+                reasons.append(
+                    f"{cmp_.name} (dataset-level, advisory): degraded by "
+                    f"{cmp_.mean_diff:+.4f} (MDE={mdes[cmp_.name]:.4f})"
+                )
+            elif rejected_by_name.get(cmp_.name):
                 decision = DECISION_BLOCK
                 reasons.append(
                     f"{cmp_.name}: degraded by {cmp_.mean_diff:+.4f} "
@@ -442,8 +399,8 @@ def decide(
                 if decision == DECISION_PASS:
                     decision = DECISION_WARN
                 reasons.append(
-                    f"{cmp_.name} (dataset-level, advisory v1): degraded by "
-                    f"{cmp_.mean_diff:+.4f}"
+                    f"{cmp_.name}: negative trend Δ={cmp_.mean_diff:+.4f} "
+                    f"but p={cmp_.p_value:.4f} was not rejected by Holm"
                 )
         elif cmp_.effect == EFFECT_TOO_FEW:
             if decision == DECISION_PASS:
@@ -464,10 +421,10 @@ def decide(
                     decision = DECISION_WARN
                 reasons.append(
                     f"{cmp_.name}: negative trend Δ={cmp_.mean_diff:+.4f} "
-                    f"but p={cmp_.p_value:.4f} (not significant after Holm)"
+                    f"but p={cmp_.p_value:.4f} (not significant)"
                 )
     if not reasons:
-        reasons.append("No canonical metric showed a significant regression.")
+        reasons.append("No canonical metric showed a regression beyond its gate threshold.")
 
     return {
         "schema_version": 1,
@@ -505,5 +462,4 @@ __all__ = [
     "decide",
     "holm_bonferroni",
     "mcnemar_one_sided",
-    "paired_bootstrap_ci",
 ]

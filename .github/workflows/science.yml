@@ -1,10 +1,10 @@
-# Science Regression Gate — paired t-test on canonical efficacy metrics.
+# Science Regression Gate — paired efficacy comparisons.
 #
 # Runs the pipeline at the PR's base + head SHAs against both golden failure-mode
 # configs (safety + quality), computes 6 canonical science-efficacy metrics
 # plus 4 auxiliary aggregates, runs paired statistical tests, and gates
-# the PR with Holm-Bonferroni-corrected significance over the canonical
-# metrics. Auxiliaries are reported but advisory.
+# the PR with Holm-Bonferroni-corrected significance over canonical paired
+# metrics. Dataset-level and auxiliary metrics are advisory.
 #
 # Phased rollout
 # --------------
@@ -19,8 +19,8 @@
 #   test_set:200   — pre-release
 #   test_set:500   — nightly / calibration
 #
-# Triggers on any PR touching pipeline code, prompts, or the regression
-# harness itself.
+# PR runs are limited to the regression harness, fixtures, focused tests, and
+# this workflow. Scheduled/manual runs provide the broader sentinel.
 
 name: Science Regression Gate
 
@@ -69,10 +69,10 @@ jobs:
           pip install uv
           uv pip install --system -e ".[dev]"
       - name: Run regression module unit tests
-        run: pytest tests/test_regression_metrics.py tests/test_regression_decision.py -x -q
+        run: pytest tests/test_regression_metrics.py tests/test_regression_decision.py tests/test_regression_runner.py -x -q
 
   science-gate:
-    name: "Science: paired t-test gate"
+    name: "Science: paired regression gate"
     needs: unit-regression-modules
     # Phase 1: advisory. Flip to false (or remove) once noise is calibrated.
     continue-on-error: true
@@ -156,9 +156,8 @@ jobs:
 
       - name: Compute cache key
         id: cache_key
-        # Cache baseline runs by (base sha, judge model, test-set size, script
-        # hash, configs hash). Same-base PRs reuse the baseline; only
-        # treatment is re-run.
+        # Cache baseline-only runs within the current GitHub cache scope.
+        # Treatment outputs are deliberately excluded and always rerun.
         run: |
           SCRIPT_HASH=$(sha256sum scripts/regression_test.py scripts/regression_metrics.py scripts/regression_decision.py | sha256sum | cut -c1-16)
           CFG_HASH=$(sha256sum tests/regression/config_*.yaml | sha256sum | cut -c1-16)
@@ -169,7 +168,7 @@ jobs:
         id: baseline_cache
         uses: actions/cache/restore@v4
         with:
-          path: artifacts/regression-runs
+          path: artifacts/regression-baselines
           key: ${{ steps.cache_key.outputs.key }}
 
       - name: Run regression gate
@@ -180,13 +179,15 @@ jobs:
             --treatment "${{ steps.refs.outputs.treatment }}" \
             --test_set "${{ steps.test_set.outputs.count }}" \
             --judge-model "azure/${{ env.ASSERT_JUDGE_DEPLOYMENT }}" \
+            --baseline-cache-dir artifacts/regression-baselines \
+            --enforce \
             --artifacts-dir artifacts/regression
 
       - name: Save baseline runs to cache
-        if: always() && steps.baseline_cache.outputs.cache-hit != 'true'
+        if: always() && steps.baseline_cache.outputs.cache-hit != 'true' && hashFiles('artifacts/regression-baselines/.complete') != ''
         uses: actions/cache/save@v4
         with:
-          path: artifacts/regression-runs
+          path: artifacts/regression-baselines
           key: ${{ steps.cache_key.outputs.key }}
 
       - name: Post results to PR summary

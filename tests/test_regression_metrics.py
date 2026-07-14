@@ -2,7 +2,7 @@
 
 Synthetic-data tests covering all 10 metrics. No live LLM calls. Every
 assertion is grounded in a hand-constructed ``scores.jsonl``-style fixture
-plus a ``policy.json``-style taxonomy.
+plus a ``taxonomy.json``-style behavior taxonomy.
 """
 
 from __future__ import annotations
@@ -132,6 +132,15 @@ class JudgeFailureRateTest(unittest.TestCase):
         self.assertEqual(result.per_test_case["s2"], 1)
         self.assertEqual(result.per_test_case["s1"], 0)
 
+    def test_excludes_scoring_skipped(self) -> None:
+        rows = [
+            _score("s1", "x", policy_violation=False),
+            _score("s2", "y", judge_status="scoring_skipped"),
+        ]
+        result = rm.judge_failure_rate(rows)
+        self.assertEqual(result.value, 0.0)
+        self.assertEqual(set(result.per_test_case), {"s1"})
+
 
 class ConstructCoverageTest(unittest.TestCase):
     def test_all_covered(self) -> None:
@@ -219,6 +228,19 @@ class ItemSaturationTest(unittest.TestCase):
 
 
 class ComputeAllTest(unittest.TestCase):
+    def test_canonical_metric_membership(self) -> None:
+        self.assertEqual(
+            rm.CANONICAL_METRICS,
+            (
+                "signal_rate",
+                "policy_violation_rate",
+                "overrefusal_rate",
+                "judge_failure_rate",
+                "construct_coverage",
+                "separation_strength",
+            ),
+        )
+
     def test_returns_all_metric_keys(self) -> None:
         rows = [
             _score("s1", "advisory_ignore", policy_violation=True),
