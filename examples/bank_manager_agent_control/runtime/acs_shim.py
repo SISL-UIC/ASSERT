@@ -19,10 +19,10 @@ import yaml
 
 _OPA = shutil.which("opa") or str(Path.home() / ".local" / "bin" / "opa")
 
-# Fail-SAFE score injected when a post_enrich (learned-classifier) wrapper crashes:
-# lands in the learned gate's escalate band (> escalate_lo=45, <= deny_hi=80) so an
-# enrichment failure ESCALATES to a human, never silently allows. Pinned by
-# test_llm_classifier.test_shim_wrapper_failsafe_in_escalate_band.
+# Fail-SAFE score injected when an optional post_enrich wrapper (a per-tool risk
+# enricher passed to run_tool) raises: lands in the gate's escalate band
+# (> escalate_lo=45, <= deny_hi=80) so an enrichment failure ESCALATES to a
+# human, never silently allows.
 WRAPPER_FAILSAFE_SCORE = 46
 
 

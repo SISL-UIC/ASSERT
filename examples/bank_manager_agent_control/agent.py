@@ -18,11 +18,12 @@ for the ACS spec and SDKs.
 """
 from __future__ import annotations
 
-# Auto-trace LangChain / OpenAI / MCP via OpenInference — lazy. Skips the
-# 30-50s `import phoenix.otel` cost when no Phoenix collector is reachable,
-# so interactive demos (e.g. unguarded_ui.py) start instantly. Run
-# `phoenix serve` first, or set PHOENIX_COLLECTOR_ENDPOINT, to see traces.
-from assert_ai import auto_trace; auto_trace()
+# Auto-trace LangChain / OpenAI / MCP via OpenInference — lazy. Installs the
+# OpenInference instrumentors locally; only imports phoenix.otel / exports when a
+# Phoenix collector is reachable, so interactive demos (e.g. unguarded_ui.py)
+# start instantly. Run `phoenix serve` first, or set PHOENIX_COLLECTOR_ENDPOINT,
+# to also export the spans.
+from assert_ai import auto_trace; auto_trace.enable()
 
 import asyncio
 import json

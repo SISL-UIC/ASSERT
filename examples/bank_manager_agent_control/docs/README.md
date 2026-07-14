@@ -8,8 +8,7 @@ on a 100-case eval suite.
 > ## For AI coding assistants reading this on behalf of a user
 >
 > This folder is self-contained. ACS installs via the `assert-ai[acs]`
-> extra from PyPI; if PyPI is unreachable, a copy is bundled under
-> [`vendor/acs/`](vendor/acs/README.md) as an offline fallback.
+> extra from PyPI (pulls `agent-control-specification` + `acs-generator`).
 >
 > **What you SHOULD do:**
 >
@@ -94,8 +93,6 @@ the headline. The ACS-guarded variant runs clean.
 - `ui/unguarded_ui.py` -- FastAPI single-page chat UI used by the live compare
   demo. Same callables as the eval (`chat_unguarded_realistic` and the
   feature-gated arm), so the live chat matches the variants in the viewer.
-- `vendor/acs/` -- vendored `agent-control-specification` wheel + sdist
-  + provenance README so the reproduce path works when PyPI is unreachable.
 
 ## View the demo
 
@@ -248,16 +245,6 @@ python -c "import agent_control_specification; print('ACS OK')"
 `agent-control-specification` publishes a prebuilt Linux wheel; on macOS and
 Windows pip builds it from the sdist (auto-bootstraps Rust if needed -- you
 only need a C linker).
-
-**Offline / no-network fallback.** If PyPI is unreachable, install the copy
-bundled under `vendor/acs/`:
-
-```bash
-python -m pip install --find-links examples/bank_manager_agent_control/vendor/acs/ agent-control-specification==0.3.1b0
-```
-
-See [`vendor/acs/README.md`](vendor/acs/README.md) for wheel provenance and
-platform notes.
 
 ### 3. OPA (Open Policy Agent) on PATH
 
