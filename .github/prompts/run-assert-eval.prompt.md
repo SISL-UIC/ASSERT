@@ -1,11 +1,11 @@
 ---
 agent: agent
-description: 'Run an ASSERT evaluation starting from Clarity-discovered risks. Runs the real Clarity CLI in-IDE to discover risks, generates one atomic eval_config.yaml per selected risk, runs the assert-ai pipeline, and reports per-dimension pass/violation rates with trace-cited failure examples.'
+description: 'Run an ASSERT evaluation starting from Clarity-discovered risks. Drives the real Clarity MCP tools (run_clarity) in-IDE to discover risks, generates one atomic eval_config.yaml per selected risk, runs the assert-ai pipeline, and reports per-dimension pass/violation rates with trace-cited failure examples.'
 ---
 
 # Run an ASSERT evaluation
 
-You help the user run an end-to-end ASSERT evaluation whose risks are discovered with Clarity. You orchestrate existing `clarity` and `assert-ai` CLI commands — you do not reimplement Clarity's questioning or any pipeline logic.
+You help the user run an end-to-end ASSERT evaluation whose risks are discovered with Clarity. You drive the existing Clarity **MCP tools** and `assert-ai` CLI — you do not reimplement Clarity's questioning or any pipeline logic.
 
 Read `AGENTS.md` at the repository root for full orientation on the ASSERT project, terminology, and target selection.
 
@@ -15,12 +15,12 @@ The user wants evidence of how their agent or model actually behaves. This skill
 
 This skill has two entry modes:
 
-- **Run mode** — no usable results exist yet. Risks come from **Clarity** (Steps 1-2): an existing `.clarity-protocol/` directory or a fresh run of the real Clarity CLI, driven in-IDE. Then turn each selected risk into an atomic config, run the pipeline (Steps 3-5), then report (Step 6).
+- **Run mode** — no usable results exist yet. Risks come from **Clarity** (Steps 1-2): an existing `.clarity-protocol/` directory or a fresh discovery run via the Clarity MCP `run_clarity` tool, driven in-IDE. Then turn each selected risk into an atomic config, run the pipeline (Steps 3-5), then report (Step 6).
 - **Results Q&A mode** — judged artifacts already exist under `artifacts/results/<suite>/<run>/` and the user asks a *question* about them ("what are the highlights?", "top 3 examples of the worst failure mode?", "why did case X fail?"). Skip to Step 6 and answer THAT question from the artifacts — do not re-run, and do not fall back to the full canned report unless asked.
 
 ### Clarity is required for Run mode — no non-Clarity fallback
 
-Risks that seed an eval MUST come from Clarity (an existing `.clarity-protocol/` or a fresh real Clarity run). Do **not** substitute a plain-language description, and do **not** imitate Clarity's questioning yourself — an eval spec that skips Clarity's captured risks produces inaccurate, low-signal results. If Clarity cannot be installed, authenticated, or run, STOP and help the user fix it (Preconditions) rather than proceeding.
+Risks that seed an eval MUST come from Clarity (an existing `.clarity-protocol/` or a fresh discovery run via the Clarity MCP `run_clarity` tool). Do **not** substitute a plain-language description, and do **not** imitate Clarity's questioning from your own head — `run_clarity` returns Clarity's real process guide inlined, and you follow *that* to conduct the clarifying loop. An eval spec that skips Clarity's captured risks produces inaccurate, low-signal results. If the Clarity MCP tools are not available, STOP and help the user set them up (see `SETUP-CHECKLIST.md`) rather than proceeding.
 
 ### Copilot vs. the local viewer
 
@@ -33,14 +33,7 @@ Copilot is for *answering questions* and *synthesis* — direct answers, failure
    python -m pip install -e ".[otel,langgraph]"
    ```
 
-2. **Clarity CLI installed** (required for Run mode): `clarity doctor` succeeds. Clarity is the risk-discovery engine — the skill calls its real backend, it does not reimplement it. If missing, guide the real install (from https://github.com/microsoft/clarity-agent):
-   ```
-   # macOS / Linux
-   curl -fsSL https://raw.githubusercontent.com/microsoft/clarity-agent/main/scripts/install.sh | bash
-   # Windows (PowerShell)
-   irm https://raw.githubusercontent.com/microsoft/clarity-agent/main/scripts/install.ps1 | iex
-   ```
-   Select the LLM provider that matches THIS assistant so Clarity runs on the same credentials/model and the whole conversation stays in the IDE — GitHub Copilot → `--provider github` (reuses `copilot auth login`). If Clarity cannot be installed, authenticated, or run, STOP and help the user resolve it. Do not proceed with a non-Clarity path.
+2. **Clarity MCP server available** (required for Run mode): the `clarity-agent` MCP tools (`run_clarity`, `write_protocol_document`, `record_failure`, `record_suggestion`, …) are callable in this session. Clarity is the risk-discovery engine — the skill drives its real MCP tools, it does not reimplement it. If the tools are missing, the server is not wired up yet: guide the user through `SETUP-CHECKLIST.md` (install `clarity-agent` with the `[mcp]` extra, run `clarity embed .` to generate `.vscode/mcp.json`, reload MCP servers) and confirm the LLM provider is configured (`clarity doctor` — Clarity supports GitHub Copilot, Anthropic, OpenAI, Azure AI, and Gemini). If the Clarity MCP tools cannot be made available, STOP and help the user resolve it. Do not proceed with a non-Clarity path.
 
 3. **Provider creds exist** in `.env`. NEVER read or print `.env`. If a run fails with an auth error, tell the user which variable NAMES are required (AZURE_API_KEY, AZURE_API_BASE, OPENAI_API_KEY, GITHUB_TOKEN, ANTHROPIC_API_KEY, etc.) — never their values.
 
@@ -48,22 +41,19 @@ Copilot is for *answering questions* and *synthesis* — direct answers, failure
 
 ### 1. Discover risks with Clarity (required front door)
 
-Risks come from Clarity's real engine, run in the IDE's integrated terminal — never from a plain-language guess and never by imitating Clarity yourself.
+Risks come from Clarity's real engine, driven through the **Clarity MCP server** — never from a plain-language guess and never by imitating Clarity from your own head.
 
 - **If a `.clarity-protocol/` directory already exists** in the workspace, use it directly as the risk source — skip straight to reading its output below.
-- **Otherwise run the real Clarity CLI in the terminal**, using the provider that matches this assistant (see Preconditions):
-  ```
-  clarity embed .                       # wire the protocol into the repo
-  clarity cli . --provider github
-  ```
-  Clarity's own `ClaritySession` drives problem-clarification → failure-brainstorming (its multi-perspective thinker architecture). The user answers Clarity's questions right here in the IDE; Clarity writes the real `.clarity-protocol/`.
+- **Otherwise run discovery via the Clarity MCP tools:** call **`run_clarity`** (it returns Clarity's real process guide inlined as text), follow that guide to ask the user the clarifying questions **in chat**, and persist findings with **`write_protocol_document`** and **`record_failure`** until `.clarity-protocol/failures/failures.md` is written. (Copilot agent mode supports MCP *tools*, so drive the loop yourself rather than expecting a separate chat UI.)
 
 Read Clarity's output to enumerate risks:
 
 - **`.clarity-protocol/failures/failures.md`** — the failure modes, causal chains, and management plans. Each distinct failure mode is one candidate ASSERT behavior.
 - **`.clarity-protocol/summary.md`, `goal/requirements.md`, `solution/architecture.md`** — target/context for the eval's `context` field.
 
-Clarity records severity/management-plan signal but no literal P1/P2/P3 — order and annotate by what Clarity actually captured; do not fabricate priorities.
+**For the full measurement path** — parse → triage → one atomic config per selected failure → sequential runs → report → close the loop — follow `../../.claude/skills/run-assert-eval/workflows/measure-clarity-failures.md` and use the intake parser (`clarity_intake.py`) to convert `failures.md` into candidate behaviors (severity→priority, variant-derived stratify dimensions).
+
+Clarity records severity/management-plan signal (the parser maps Critical→P1, High→P2, Medium→P3, ranges→max) — order and annotate by what Clarity actually captured; do not fabricate priorities.
 
 ### 2. Triage — choose which risks to measure now
 
@@ -152,8 +142,9 @@ For each failure:
 
 ## Guardrails
 
-- **Clarity is the required risk source** — for Run mode, risks come from Clarity (existing `.clarity-protocol/` or a fresh real run). Never substitute a plain-language guess or imitate Clarity's questioning; if Clarity can't run, stop and help fix it.
-- **Call the real Clarity CLI in-IDE** — invoke `clarity` in the integrated terminal on the provider matching this assistant; never hand the user off to a separate Clarity app.
+- **Clarity is the required risk source** — for Run mode, risks come from Clarity (existing `.clarity-protocol/` or a fresh discovery run via the `run_clarity` MCP tool). Never substitute a plain-language guess or imitate Clarity's questioning from your own head; if the MCP tools can't be made available, stop and help fix it (`SETUP-CHECKLIST.md`).
+- **Drive the real Clarity MCP tools in-IDE** — use `run_clarity` / `write_protocol_document` / `record_failure` for discovery and `record_suggestion` to close the loop; never hand the user off to a separate Clarity app and never shell out to a `clarity cli` process.
+- **Close the loop** — after a run, offer `record_suggestion` (or `record_decision`) back into `.clarity-protocol/` noting the failure mode now has a measured baseline and where the eval lives.
 - **One atomic behavior per config** — split N selected risks into N configs run sequentially; never bundle.
 - **Triage before running** — never auto-generate an eval for every Clarity failure mode; ask which to measure now.
 - **Don't invent metrics** — only report what's in the artifacts.

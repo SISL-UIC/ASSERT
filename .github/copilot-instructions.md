@@ -10,7 +10,7 @@ Never read, print, commit, or infer secrets from `.env` or other local environme
 
 Use the matching prompt file when the user's request matches:
 
-- **run-assert-eval** (`.github/prompts/run-assert-eval.prompt.md`): Run an end-to-end ASSERT evaluation whose risks are discovered with Clarity. Runs the real `clarity` CLI in-IDE to surface risks, splits the selected risks into one atomic config per behavior, runs the pipeline, and summarizes scored results with cited failures. Reports `policy_violation` and `overrefusal` separately.
+- **run-assert-eval** (`.github/prompts/run-assert-eval.prompt.md`): Run an end-to-end ASSERT evaluation whose risks are discovered with Clarity. Drives the Clarity MCP tools (`run_clarity`) in-IDE to surface risks, then follows `workflows/measure-clarity-failures.md` — human triage, splits the selected risks into one atomic config per behavior, runs the pipeline, and summarizes scored results with cited failures. Reports `policy_violation` and `overrefusal` separately.
 
 Equivalent guidance for other assistants lives in `.claude/skills/run-assert-eval/SKILL.md` (Claude Code)
 and `.cursor/rules/assert.mdc` (Cursor). Keep all three aligned when you change the methodology.
