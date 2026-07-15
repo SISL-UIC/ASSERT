@@ -183,7 +183,9 @@ def test_push_dry_run_prints_summary(monkeypatch: Any, tmp_path: Any) -> None:
     assert "ASSERT run: r1" in result.output
     assert "assert-sample" in result.output
     assert "deadbeef1234" in result.output
-    assert "Dataset rows    42" in result.output
+    # Rich table renders label + value on the same line; check both are present.
+    assert "Dataset rows" in result.output
+    assert "42" in result.output
     assert "gpt-5.4-mini" in result.output
 
 
@@ -209,14 +211,102 @@ def test_push_prints_ids_and_reuse_markers(monkeypatch: Any, tmp_path: Any) -> N
     )
 
     assert result.exit_code == 0, result.output
-    assert "Published eval  eval_stub" in result.output
-    assert "Published run   evalrun_stub" in result.output
+    assert "eval_stub" in result.output
+    assert "evalrun_stub" in result.output
     # Dataset reused flag surfaces.
-    assert "Dataset asset" in result.output
+    assert "Dataset" in result.output
     assert "(reused)" in result.output
-    # Per-evaluator lines list both variants with the reuse marker on one.
-    assert "assert-policy_violation v1 (code) (reused)" in result.output
-    assert "assert-policy_violation-rescore v1 (prompt)" in result.output
+    # Per-evaluator rows list both variants with the reuse marker on one.
+    assert "assert-policy_violation" in result.output
+    assert "assert-policy_violation-rescore" in result.output
+    assert "code" in result.output
+    assert "prompt" in result.output
+    assert "reused" in result.output
+    assert "new" in result.output
+
+
+# ── JSON output ────────────────────────────────────────────────────
+
+
+def test_push_dry_run_json_output(monkeypatch: Any, tmp_path: Any) -> None:
+    import json as _json
+
+    _install_stub(monkeypatch, _stub_dry_run)
+
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        [
+            "foundry",
+            "push",
+            str(run_dir),
+            "--project",
+            "acct/proj",
+            "--dry-run",
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = _json.loads(result.output)
+    assert payload["dry_run"] is True
+    assert payload["eval_name"] == "ASSERT: sample"
+    assert payload["run_name"] == "ASSERT run: r1"
+    assert payload["dataset_name"] == "assert-sample"
+    assert payload["dataset_version"] == "deadbeef1234"
+    assert payload["dataset_row_count"] == 42
+    assert payload["judge_deployment"] == "gpt-5.4-mini"
+    assert payload["passing_when_true"] == {}
+    assert payload["evaluators"] == []
+
+
+def test_push_result_json_output(monkeypatch: Any, tmp_path: Any) -> None:
+    import json as _json
+
+    _install_stub(monkeypatch, _stub_push_result)
+
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        [
+            "foundry",
+            "push",
+            str(run_dir),
+            "--project",
+            "acct/proj",
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = _json.loads(result.output)
+    assert payload["dry_run"] is False
+    assert payload["eval_id"] == "eval_stub"
+    assert payload["run_id"] == "evalrun_stub"
+    assert payload["reused_eval"] is False
+    assert payload["dataset"]["name"] == "assert-sample"
+    assert payload["dataset"]["version"] == "deadbeef1234"
+    assert payload["dataset"]["reused"] is True
+    assert payload["evaluators"] == [
+        {
+            "name": "assert-policy_violation",
+            "version": "1",
+            "variant": "code",
+            "reused": True,
+        },
+        {
+            "name": "assert-policy_violation-rescore",
+            "version": "1",
+            "variant": "prompt",
+            "reused": False,
+        },
+    ]
 
 
 # ── Error propagation ──────────────────────────────────────────────

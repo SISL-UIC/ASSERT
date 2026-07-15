@@ -1536,6 +1536,8 @@ def _parse_passing_when_true(pair: str) -> tuple[str, bool]:
     is_flag=True,
     help="Do not make any network calls. Print what the exporter would send.",
 )
+@click.option("--json", "as_json", is_flag=True, help="Emit machine-readable JSON instead of tables.")
+@click.option("--no-color", is_flag=True, help="Disable colored terminal output.")
 def foundry_push(
     run_dir: Path,
     project: str,
@@ -1546,6 +1548,8 @@ def foundry_push(
     passing_when_true: tuple[str, ...],
     judge_threshold: float,
     dry_run: bool,
+    as_json: bool,
+    no_color: bool,
 ) -> None:
     """Publish a completed ASSERT run to Azure AI Foundry.
 
@@ -1584,30 +1588,108 @@ def foundry_push(
         return
 
     if isinstance(result, dry_result_cls):
-        click.echo("Dry-run — no network calls made.\n")
-        click.echo(f"Eval name       {result.eval_name}")
-        click.echo(f"Run name        {result.run_name}")
-        click.echo(f"Dataset name    {result.dataset_name}")
-        click.echo(f"Dataset version {result.dataset_version}")
-        click.echo(f"Dataset rows    {result.dataset_row_count}")
-        click.echo(f"Judge model     {result.judge_deployment or '(unresolved)'}")
-        click.echo(f"Passing-when-true overrides: {dict(result.passing_when_true) or '(none)'}")
-        click.echo(f"\nEvaluators ({len(result.evaluator_specs)}):")
-        for spec in result.evaluator_specs:
-            click.echo(f"  - {spec.evaluator_name} ({spec.variant})")
+        if as_json:
+            _echo_json({
+                "dry_run": True,
+                "eval_name": result.eval_name,
+                "run_name": result.run_name,
+                "dataset_name": result.dataset_name,
+                "dataset_version": result.dataset_version,
+                "dataset_row_count": result.dataset_row_count,
+                "judge_deployment": result.judge_deployment,
+                "passing_when_true": dict(result.passing_when_true),
+                "evaluators": [
+                    {"name": spec.evaluator_name, "variant": spec.variant}
+                    for spec in result.evaluator_specs
+                ],
+            })
+            return
+
+        console = _console(no_color=no_color)
+        console.print("Dry-run — no network calls made.\n")
+
+        summary = Table(box=None, show_header=False, show_edge=False, pad_edge=False)
+        summary.add_column("Field", style="cyan", no_wrap=True)
+        summary.add_column("Value", style="white")
+        summary.add_row("Eval name", result.eval_name)
+        summary.add_row("Run name", result.run_name)
+        summary.add_row("Dataset name", result.dataset_name)
+        summary.add_row("Dataset version", result.dataset_version)
+        summary.add_row("Dataset rows", str(result.dataset_row_count))
+        summary.add_row("Judge model", result.judge_deployment or "(unresolved)")
+        overrides_str = ", ".join(
+            f"{k}={str(v).lower()}" for k, v in sorted(dict(result.passing_when_true).items())
+        ) or "(none)"
+        summary.add_row("Passing-when-true", overrides_str)
+        console.print(summary)
+
+        if result.evaluator_specs:
+            table = Table(
+                title=f"Evaluators ({len(result.evaluator_specs)})",
+                box=None,
+                show_header=True,
+                show_edge=False,
+                pad_edge=False,
+            )
+            table.add_column("Name", style="cyan", no_wrap=True)
+            table.add_column("Variant", style="white", no_wrap=True)
+            for spec in result.evaluator_specs:
+                table.add_row(spec.evaluator_name, spec.variant)
+            console.print(table)
         return
 
-    click.echo(f"Published eval  {result.eval_id}"
-               + (" (reused)" if result.reused_eval else ""))
-    click.echo(f"Published run   {result.run_id}")
-    click.echo(f"Dataset asset   {result.dataset_ref.asset_id}"
-               + (" (reused)" if result.reused_dataset else ""))
-    click.echo(f"Registered {len(result.evaluator_refs)} evaluator(s)"
-               + (f", {len(result.reused_evaluators)} reused" if result.reused_evaluators else "")
-               + ":")
-    for ref in result.evaluator_refs:
-        marker = " (reused)" if ref.evaluator_name in set(result.reused_evaluators) else ""
-        click.echo(f"  - {ref.evaluator_name} v{ref.evaluator_version} ({ref.variant}){marker}")
+    reused_set = set(result.reused_evaluators)
+
+    if as_json:
+        _echo_json({
+            "dry_run": False,
+            "eval_id": result.eval_id,
+            "run_id": result.run_id,
+            "reused_eval": result.reused_eval,
+            "dataset": {
+                "name": result.dataset_ref.name,
+                "version": result.dataset_ref.version,
+                "asset_id": result.dataset_ref.asset_id,
+                "reused": result.reused_dataset,
+            },
+            "evaluators": [
+                {
+                    "name": ref.evaluator_name,
+                    "version": ref.evaluator_version,
+                    "variant": ref.variant,
+                    "reused": ref.evaluator_name in reused_set,
+                }
+                for ref in result.evaluator_refs
+            ],
+        })
+        return
+
+    console = _console(no_color=no_color)
+    summary = Table(box=None, show_header=False, show_edge=False, pad_edge=False)
+    summary.add_column("Field", style="cyan", no_wrap=True)
+    summary.add_column("Value", style="white")
+    summary.add_row("Eval", f"{result.eval_id}{' (reused)' if result.reused_eval else ''}")
+    summary.add_row("Run", result.run_id)
+    summary.add_row(
+        "Dataset",
+        f"{result.dataset_ref.asset_id}{' (reused)' if result.reused_dataset else ''}",
+    )
+    console.print(summary)
+
+    if result.evaluator_refs:
+        title = f"Evaluators ({len(result.evaluator_refs)}"
+        if reused_set:
+            title += f", {len(reused_set)} reused"
+        title += ")"
+        table = Table(title=title, box=None, show_header=True, show_edge=False, pad_edge=False)
+        table.add_column("Name", style="cyan", no_wrap=True)
+        table.add_column("Version", style="white", no_wrap=True)
+        table.add_column("Variant", style="white", no_wrap=True)
+        table.add_column("Status", style="white", no_wrap=True)
+        for ref in result.evaluator_refs:
+            status = "reused" if ref.evaluator_name in reused_set else "new"
+            table.add_row(ref.evaluator_name, f"v{ref.evaluator_version}", ref.variant, status)
+        console.print(table)
 
 
 @cli.group(cls=SuggestingGroup, short_help="Generate and validate ACS policies from ASSERT findings")
