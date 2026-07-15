@@ -51,19 +51,39 @@ commit installs the extras + scaffold only.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:  # pragma: no cover - import-time typing only
+    from assert_ai.integrations.foundry.artifacts import (
+        AssertRun,
+        AssertRunError,
+        load_run,
+        viewer_file_names,
+    )
+
 
 # Map each lazily-loaded public symbol to the submodule that defines it. The
 # submodule import is what triggers the optional third-party dependency, so we
 # defer it until the symbol is actually requested. Populated as later commits
 # land the loader, evaluators, dataset row builder, pipeline, and CLI wiring.
-_LAZY_EXPORTS: dict[str, str] = {}
+_LAZY_EXPORTS: dict[str, str] = {
+    "AssertRun": "artifacts",
+    "AssertRunError": "artifacts",
+    "load_run": "artifacts",
+    "viewer_file_names": "artifacts",
+}
 
 # Human-readable install hints per submodule, surfaced when the optional
 # dependency that backs a lazy symbol is missing.
 _MISSING_DEPENDENCY_HINT: dict[str, str] = {}
 
 
-__all__: list[str] = []
+__all__: list[str] = [
+    "AssertRun",
+    "AssertRunError",
+    "load_run",
+    "viewer_file_names",
+]
 
 
 def __getattr__(name: str) -> object:
