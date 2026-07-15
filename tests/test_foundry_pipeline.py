@@ -110,6 +110,7 @@ class _NotFound(KeyError):
 class _FakeEvaluators:
     existing: dict[tuple[str, str], Any] = field(default_factory=dict)
     created: list[tuple[str, Any]] = field(default_factory=list)
+    deleted: list[tuple[str, str]] = field(default_factory=list)
 
     def get_version(self, name: str, version: str) -> Any:
         key = (name, version)
@@ -121,6 +122,10 @@ class _FakeEvaluators:
         self.created.append((name, evaluator_version))
         self.existing[(name, "1")] = evaluator_version
         return evaluator_version
+
+    def delete_version(self, name: str, version: str) -> None:
+        self.deleted.append((name, version))
+        self.existing.pop((name, version), None)
 
 
 @dataclass
@@ -415,19 +420,25 @@ def test_push_registers_evaluators_when_missing() -> None:
     ]
 
 
+def _existing_evaluator(definition_type: str) -> dict[str, Any]:
+    """A minimal SDK-shaped evaluator version stub with the requested type."""
+    return {"definition": {"type": definition_type}}
+
+
 def test_push_reuses_existing_evaluators() -> None:
-    """GET-first idempotency: pre-existing versions are not re-created."""
+    """GET-first idempotency: pre-existing versions with matching variant are reused."""
     existing_ev = {
-        ("assert-overrefusal", "1"): object(),
-        ("assert-overrefusal-rescore", "1"): object(),
-        ("assert-policy_violation", "1"): object(),
-        ("assert-policy_violation-rescore", "1"): object(),
+        ("assert-overrefusal", "1"): _existing_evaluator("code"),
+        ("assert-overrefusal-rescore", "1"): _existing_evaluator("prompt"),
+        ("assert-policy_violation", "1"): _existing_evaluator("code"),
+        ("assert-policy_violation-rescore", "1"): _existing_evaluator("prompt"),
     }
     client = _fake_client(existing_evaluators=existing_ev)
 
     result = push_run(_make_run(), project_client=client)
 
     assert client.beta.evaluators.created == []  # nothing re-registered
+    assert client.beta.evaluators.deleted == []  # nothing dropped for drift
     assert isinstance(result, PushResult)
     assert sorted(result.reused_evaluators) == [
         "assert-overrefusal",
@@ -435,6 +446,29 @@ def test_push_reuses_existing_evaluators() -> None:
         "assert-policy_violation",
         "assert-policy_violation-rescore",
     ]
+
+
+def test_push_replaces_stale_rubric_evaluator_with_code_variant() -> None:
+    """Existing 'rubric' (v1 shape) is a schema mismatch → delete + re-register.
+
+    Foundry treats the definition.type as immutable per name+version, so a
+    silent reuse would fail eval-create against the stale schema. The
+    pipeline detects the mismatch, calls delete_version, and re-registers
+    with the current code-variant spec.
+    """
+    stale = {("assert-policy_violation", "1"): _existing_evaluator("rubric")}
+    client = _fake_client(existing_evaluators=stale)
+
+    result = push_run(_make_run(), evaluator_mode="code", project_client=client)
+
+    assert isinstance(result, PushResult)
+    # Old rubric evaluator got dropped.
+    assert ("assert-policy_violation", "1") in client.beta.evaluators.deleted
+    # Fresh code-variant registered.
+    created_names = {name for name, _ in client.beta.evaluators.created}
+    assert "assert-policy_violation" in created_names
+    # It's not counted as "reused" because we had to replace it.
+    assert "assert-policy_violation" not in result.reused_evaluators
 
 
 def test_push_uploads_dataset_when_content_hash_new() -> None:

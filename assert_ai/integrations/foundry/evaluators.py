@@ -362,28 +362,22 @@ def _render_code_grader(dimension_id: str) -> str:
 def _code_data_schema(dimension_id: str) -> dict:
     """JSON schema declaring the row fields the code grader reads.
 
-    ``item.assert_scores.{dimension_id}`` is required so Foundry's
-    dataset validator rejects rows without a pre-computed ASSERT
-    verdict before scoring wastes a sandbox call.
+    ``assert_scores`` is exposed as a top-level required field. Foundry
+    binds the corresponding row column via the eval's
+    ``data_mapping``: ``{"assert_scores": "{{item.assert_scores}}"}``.
     """
     return {
         "type": "object",
         "properties": {
-            "item": {
+            "assert_scores": {
                 "type": "object",
                 "properties": {
-                    "assert_scores": {
-                        "type": "object",
-                        "properties": {
-                            dimension_id: {"type": "number"},
-                        },
-                        "required": [dimension_id],
-                    },
+                    dimension_id: {"type": "number"},
                 },
-                "required": ["assert_scores"],
+                "required": [dimension_id],
             },
         },
-        "required": ["item"],
+        "required": ["assert_scores"],
     }
 
 

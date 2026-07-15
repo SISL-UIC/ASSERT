@@ -399,22 +399,38 @@ def _ensure_evaluators(
     evaluators_op: Any,
     specs: Sequence[AssertEvaluatorSpec],
 ) -> tuple[list[EvaluatorRef], list[str]]:
-    """Register each spec unless the named+version already exists.
+    """Register each spec unless the named+version already exists as the same variant.
 
     Foundry's evaluator name+version is the identity; if the same
     ``assert-{dim}[/-rescore]`` at version ``"1"`` already exists in
-    the catalog, we treat it as a reuse rather than churning versions
-    on every push. Callers who want a bump can delete the version in
-    the Foundry UI (or add a ``foundry gc`` command in a follow-up).
+    the catalog **as the same variant** (code vs prompt vs the
+    older ``rubric`` shape ASSERT v1 shipped), reuse it.
+
+    If the existing version has a different definition type (e.g. a
+    stale ``rubric`` evaluator left behind by ASSERT v1), delete it
+    and re-register with the current spec. Foundry treats a mismatched
+    schema as unusable in downstream eval-create — silent reuse would
+    fail later with an opaque validation error.
+
+    Callers who want a fresh registration can also delete the version
+    in the Foundry UI before pushing.
     """
     refs: list[EvaluatorRef] = []
     reused: list[str] = []
     for spec in specs:
         name = spec.evaluator_name
         version = "1"
-        if _evaluator_version_exists(evaluators_op, name=name, version=version):
+        expected_type = _expected_definition_type(spec)
+        existing = _get_evaluator_version(evaluators_op, name=name, version=version)
+        if existing is None:
+            evaluators_op.create_version(name, spec.evaluator_version)
+        elif _definition_type_of(existing) == expected_type:
             reused.append(name)
         else:
+            # Stale evaluator with a different definition type — delete
+            # and re-register so downstream eval-create doesn't fail
+            # against a mismatched schema.
+            evaluators_op.delete_version(name, version)
             evaluators_op.create_version(name, spec.evaluator_version)
         refs.append(
             EvaluatorRef(
@@ -427,15 +443,25 @@ def _ensure_evaluators(
     return refs, reused
 
 
-def _evaluator_version_exists(
+def _get_evaluator_version(
     evaluators_op: Any, *, name: str, version: str
-) -> bool:
-    """Return True iff GET evaluator/{name}/{version} succeeds."""
+) -> Any | None:
+    """Return the SDK object for name/version, or ``None`` when not found."""
     try:
-        evaluators_op.get_version(name, version)
-    except _resource_not_found_types() as _:
-        return False
-    return True
+        return evaluators_op.get_version(name, version)
+    except _resource_not_found_types():
+        return None
+
+
+def _expected_definition_type(spec: AssertEvaluatorSpec) -> str:
+    """Return the ``definition.type`` Foundry stores for this spec's variant."""
+    return "code" if spec.variant == "code" else "prompt"
+
+
+def _definition_type_of(evaluator_version: Any) -> str:
+    """Extract ``definition.type`` from an SDK evaluator version object."""
+    definition = _dict_get(evaluator_version, "definition", {}) or {}
+    return str(_dict_get(definition, "type", "") or "").lower()
 
 
 # ── Step 5: dataset registration ────────────────────────────────────
@@ -591,10 +617,12 @@ def _build_testing_criteria(
         init_params: dict[str, Any] = {}
         data_mapping: dict[str, str]
         if spec.variant == "code":
-            # Code evaluator schema declares assert_scores per-dim on the row.
-            data_mapping = {
-                "item.assert_scores": "{{item.assert_scores}}",
-            }
+            # Code evaluator's data_schema declares `assert_scores` as a
+            # top-level required field on the sandbox `item` object.
+            # Foundry validates the mapping against the regex
+            # ^\{\{(?:item|sample)\.[a-zA-Z0-9_]+(\.[a-zA-Z0-9_]+)*\}\}$
+            # — the value must be `{{item.<field>}}` form, not `{{item}}`.
+            data_mapping = {"assert_scores": "{{item.assert_scores}}"}
         else:
             init_params = {
                 "deployment_name": judge_deployment,

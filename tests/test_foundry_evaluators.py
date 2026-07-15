@@ -146,15 +146,23 @@ def test_code_spec_metric_is_continuous_zero_to_one() -> None:
 
 
 def test_code_spec_data_schema_requires_pre_computed_score() -> None:
-    """Schema fails Foundry validation before scoring if the score is missing."""
+    """Schema fails Foundry validation before scoring if the score is missing.
+
+    Data schema declares ``assert_scores`` at the top level (not wrapped in
+    an ``item`` object). This matches the eval-side ``data_mapping``:
+    ``{"assert_scores": "{{item.assert_scores}}"}`` — Foundry's regex
+    validator rejects mapping values that aren't in the ``{{item.foo}}``
+    form and rejects mapping keys that don't match a declared schema
+    property.
+    """
     spec = build_code_evaluator_spec("policy_violation", description="x")
     schema = spec.evaluator_version.as_dict()["definition"]["data_schema"]
 
-    item_props = schema["properties"]["item"]["properties"]
-    assert "assert_scores" in item_props
-    assert "policy_violation" in item_props["assert_scores"]["properties"]
-    assert item_props["assert_scores"]["required"] == ["policy_violation"]
-    assert schema["properties"]["item"]["required"] == ["assert_scores"]
+    assert schema["type"] == "object"
+    assert "assert_scores" in schema["properties"]
+    assert schema["required"] == ["assert_scores"]
+    assert "policy_violation" in schema["properties"]["assert_scores"]["properties"]
+    assert schema["properties"]["assert_scores"]["required"] == ["policy_violation"]
 
 
 def test_code_spec_init_parameters_are_empty() -> None:
