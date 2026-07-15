@@ -78,6 +78,23 @@ if TYPE_CHECKING:  # pragma: no cover - import-time typing only
         content_hash,
         rows_to_jsonl_bytes,
     )
+    from assert_ai.integrations.foundry.pipeline import (
+        DATASET_NAME_PREFIX,
+        DatasetRef,
+        DryRunResult,
+        EVAL_NAME_PREFIX,
+        EvaluatorRef,
+        PushError,
+        PushResult,
+        RUN_NAME_PREFIX,
+        default_dataset_name,
+        default_eval_name,
+        default_run_name,
+        push_run,
+        push_run_dir,
+        resolve_judge_deployment,
+        strip_litellm_prefix,
+    )
 
 
 # Map each lazily-loaded public symbol to the submodule that defines it. The
@@ -103,6 +120,21 @@ _LAZY_EXPORTS: dict[str, str] = {
     "build_dataset_rows": "dataset",
     "content_hash": "dataset",
     "rows_to_jsonl_bytes": "dataset",
+    "DATASET_NAME_PREFIX": "pipeline",
+    "DatasetRef": "pipeline",
+    "DryRunResult": "pipeline",
+    "EVAL_NAME_PREFIX": "pipeline",
+    "EvaluatorRef": "pipeline",
+    "PushError": "pipeline",
+    "PushResult": "pipeline",
+    "RUN_NAME_PREFIX": "pipeline",
+    "default_dataset_name": "pipeline",
+    "default_eval_name": "pipeline",
+    "default_run_name": "pipeline",
+    "push_run": "pipeline",
+    "push_run_dir": "pipeline",
+    "resolve_judge_deployment": "pipeline",
+    "strip_litellm_prefix": "pipeline",
 }
 
 # Human-readable install hints per submodule, surfaced when the optional
@@ -111,6 +143,11 @@ _MISSING_DEPENDENCY_HINT: dict[str, str] = {
     "evaluators": (
         "The Foundry evaluator spec builder requires the 'azure-ai-projects' "
         "package. Install the Foundry extra with: pip install \"assert-ai[foundry]\""
+    ),
+    "pipeline": (
+        "The Foundry pipeline requires the 'azure-ai-projects' and "
+        "'azure-identity' packages. Install the Foundry extra with: "
+        "pip install \"assert-ai[foundry]\""
     ),
 }
 
@@ -134,6 +171,21 @@ __all__: list[str] = [
     "build_dataset_rows",
     "content_hash",
     "rows_to_jsonl_bytes",
+    "DATASET_NAME_PREFIX",
+    "DatasetRef",
+    "DryRunResult",
+    "EVAL_NAME_PREFIX",
+    "EvaluatorRef",
+    "PushError",
+    "PushResult",
+    "RUN_NAME_PREFIX",
+    "default_dataset_name",
+    "default_eval_name",
+    "default_run_name",
+    "push_run",
+    "push_run_dir",
+    "resolve_judge_deployment",
+    "strip_litellm_prefix",
 ]
 
 
