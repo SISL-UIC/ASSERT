@@ -72,6 +72,12 @@ if TYPE_CHECKING:  # pragma: no cover - import-time typing only
         evaluator_name_for,
         resolve_rubric_prose,
     )
+    from assert_ai.integrations.foundry.dataset import (
+        DatasetRowsError,
+        build_dataset_rows,
+        content_hash,
+        rows_to_jsonl_bytes,
+    )
 
 
 # Map each lazily-loaded public symbol to the submodule that defines it. The
@@ -93,6 +99,10 @@ _LAZY_EXPORTS: dict[str, str] = {
     "build_prompt_evaluator_spec": "evaluators",
     "evaluator_name_for": "evaluators",
     "resolve_rubric_prose": "evaluators",
+    "DatasetRowsError": "dataset",
+    "build_dataset_rows": "dataset",
+    "content_hash": "dataset",
+    "rows_to_jsonl_bytes": "dataset",
 }
 
 # Human-readable install hints per submodule, surfaced when the optional
@@ -120,6 +130,10 @@ __all__: list[str] = [
     "build_prompt_evaluator_spec",
     "evaluator_name_for",
     "resolve_rubric_prose",
+    "DatasetRowsError",
+    "build_dataset_rows",
+    "content_hash",
+    "rows_to_jsonl_bytes",
 ]
 
 
