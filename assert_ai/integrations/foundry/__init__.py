@@ -60,6 +60,18 @@ if TYPE_CHECKING:  # pragma: no cover - import-time typing only
         load_run,
         viewer_file_names,
     )
+    from assert_ai.integrations.foundry.evaluators import (
+        EVALUATOR_NAME_PREFIX,
+        RESCORE_SUFFIX,
+        AssertEvaluatorSpec,
+        EvaluatorMode,
+        EvaluatorSpecError,
+        build_code_evaluator_spec,
+        build_evaluator_specs_for_run,
+        build_prompt_evaluator_spec,
+        evaluator_name_for,
+        resolve_rubric_prose,
+    )
 
 
 # Map each lazily-loaded public symbol to the submodule that defines it. The
@@ -71,11 +83,26 @@ _LAZY_EXPORTS: dict[str, str] = {
     "AssertRunError": "artifacts",
     "load_run": "artifacts",
     "viewer_file_names": "artifacts",
+    "AssertEvaluatorSpec": "evaluators",
+    "EVALUATOR_NAME_PREFIX": "evaluators",
+    "EvaluatorMode": "evaluators",
+    "EvaluatorSpecError": "evaluators",
+    "RESCORE_SUFFIX": "evaluators",
+    "build_code_evaluator_spec": "evaluators",
+    "build_evaluator_specs_for_run": "evaluators",
+    "build_prompt_evaluator_spec": "evaluators",
+    "evaluator_name_for": "evaluators",
+    "resolve_rubric_prose": "evaluators",
 }
 
 # Human-readable install hints per submodule, surfaced when the optional
 # dependency that backs a lazy symbol is missing.
-_MISSING_DEPENDENCY_HINT: dict[str, str] = {}
+_MISSING_DEPENDENCY_HINT: dict[str, str] = {
+    "evaluators": (
+        "The Foundry evaluator spec builder requires the 'azure-ai-projects' "
+        "package. Install the Foundry extra with: pip install \"assert-ai[foundry]\""
+    ),
+}
 
 
 __all__: list[str] = [
@@ -83,6 +110,16 @@ __all__: list[str] = [
     "AssertRunError",
     "load_run",
     "viewer_file_names",
+    "AssertEvaluatorSpec",
+    "EVALUATOR_NAME_PREFIX",
+    "EvaluatorMode",
+    "EvaluatorSpecError",
+    "RESCORE_SUFFIX",
+    "build_code_evaluator_spec",
+    "build_evaluator_specs_for_run",
+    "build_prompt_evaluator_spec",
+    "evaluator_name_for",
+    "resolve_rubric_prose",
 ]
 
 
