@@ -1441,6 +1441,175 @@ def foundry():
     """
 
 
+def _parse_passing_when_true(pair: str) -> tuple[str, bool]:
+    """Parse a ``dim=true|false`` --passing-when-true flag value."""
+    if "=" not in pair:
+        raise click.BadParameter(
+            f"expected 'name=true' or 'name=false', got {pair!r}"
+        )
+    name, _, raw_value = pair.partition("=")
+    name = name.strip()
+    raw_value = raw_value.strip().lower()
+    if not name:
+        raise click.BadParameter("dimension name is empty")
+    if raw_value in ("true", "1", "yes"):
+        return name, True
+    if raw_value in ("false", "0", "no"):
+        return name, False
+    raise click.BadParameter(
+        f"expected true/false for {name!r}, got {raw_value!r}"
+    )
+
+
+@foundry.command("push", short_help="Publish an ASSERT run directory to a Foundry project")
+@click.argument("run_dir", type=click.Path(exists=True, file_okay=False, path_type=Path))
+@click.option(
+    "--project",
+    required=True,
+    help=(
+        "Foundry project. Accepts: endpoint URL "
+        "(https://<account>.services.ai.azure.com/api/projects/<project>), "
+        "the '<account>/<project>' shorthand, or a Cognitive Services project "
+        "ARM id."
+    ),
+)
+@click.option(
+    "--evaluator-mode",
+    type=click.Choice(["code", "prompt", "both"], case_sensitive=False),
+    default="both",
+    show_default=True,
+    help=(
+        "Which evaluator variant(s) to register. 'code' plucks the pre-computed "
+        "ASSERT score (deterministic, no judge cost). 'prompt' has Foundry re-judge "
+        "with its own LLM against the ASSERT rubric (stochastic, one judge call per "
+        "row × dim). 'both' registers both side-by-side."
+    ),
+)
+@click.option(
+    "--eval-name",
+    default=None,
+    help=(
+        "Override the eval definition name (default: 'ASSERT: <suite_id>'). "
+        "Bump this when the ASSERT judge dimensions change so Foundry doesn't "
+        "reject the push for testing_criteria drift."
+    ),
+)
+@click.option(
+    "--run-name",
+    default=None,
+    help="Override the eval run name (default: 'ASSERT run: <run_id>').",
+)
+@click.option(
+    "--dataset-name",
+    default=None,
+    help=(
+        "Override the Foundry dataset asset name (default: 'assert-<suite_id>' "
+        "sanitized to Foundry's a-z / 0-9 / hyphen / underscore character class). "
+        "The dataset *version* is always the content hash of the row payload — "
+        "identical row content reuses the existing version."
+    ),
+)
+@click.option(
+    "--passing-when-true",
+    "passing_when_true",
+    multiple=True,
+    metavar="DIM=TRUE|FALSE",
+    help=(
+        "Override the pass direction for a custom judge dimension. Repeatable. "
+        "'DIM=true' means the ASSERT verdict True is a PASS; 'DIM=false' is the "
+        "default violation-flag convention (True = fail). Built-in dimensions "
+        "(policy_violation, overrefusal) cannot be overridden."
+    ),
+)
+@click.option(
+    "--judge-threshold",
+    type=float,
+    default=3.0,
+    show_default=True,
+    help=(
+        "Pass threshold for prompt-variant evaluators (ordinal 1-5 rubric). "
+        "3.0 = mid-scale, matches the code variant's default 0.5 in [0.0, 1.0]."
+    ),
+)
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    help="Do not make any network calls. Print what the exporter would send.",
+)
+def foundry_push(
+    run_dir: Path,
+    project: str,
+    evaluator_mode: str,
+    eval_name: str | None,
+    run_name: str | None,
+    dataset_name: str | None,
+    passing_when_true: tuple[str, ...],
+    judge_threshold: float,
+    dry_run: bool,
+) -> None:
+    """Publish a completed ASSERT run to Azure AI Foundry.
+
+    Loads RUN_DIR, registers one Foundry custom evaluator per ASSERT
+    judge dimension (per requested variant), uploads the scored rows
+    as a project-scoped dataset asset, and POSTs an eval + eval.run
+    that references both.
+
+    Requires the 'foundry' extra: pip install -e ".[foundry]"
+    """
+    push_run_dir = _load_foundry_symbol("push_run_dir")
+    push_error_cls = _load_foundry_symbol("PushError")
+    dry_result_cls = _load_foundry_symbol("DryRunResult")
+    dataset_rows_error_cls = _load_foundry_symbol("DatasetRowsError")
+    evaluator_spec_error_cls = _load_foundry_symbol("EvaluatorSpecError")
+
+    overrides: dict[str, bool] = {}
+    for pair in passing_when_true:
+        name, value = _parse_passing_when_true(pair)
+        overrides[name] = value
+
+    try:
+        result = push_run_dir(
+            str(run_dir),
+            project=project,
+            evaluator_mode=evaluator_mode.lower(),  # type: ignore[arg-type]
+            eval_name=eval_name,
+            run_name=run_name,
+            dataset_name=dataset_name,
+            passing_when_true=overrides,
+            judge_threshold=judge_threshold,
+            dry_run=dry_run,
+        )
+    except (push_error_cls, dataset_rows_error_cls, evaluator_spec_error_cls) as exc:
+        _error(str(exc))
+        return
+
+    if isinstance(result, dry_result_cls):
+        click.echo("Dry-run — no network calls made.\n")
+        click.echo(f"Eval name       {result.eval_name}")
+        click.echo(f"Run name        {result.run_name}")
+        click.echo(f"Dataset name    {result.dataset_name}")
+        click.echo(f"Dataset version {result.dataset_version}")
+        click.echo(f"Dataset rows    {result.dataset_row_count}")
+        click.echo(f"Judge model     {result.judge_deployment or '(unresolved)'}")
+        click.echo(f"Passing-when-true overrides: {dict(result.passing_when_true) or '(none)'}")
+        click.echo(f"\nEvaluators ({len(result.evaluator_specs)}):")
+        for spec in result.evaluator_specs:
+            click.echo(f"  - {spec.evaluator_name} ({spec.variant})")
+        return
+
+    click.echo(f"Published eval  {result.eval_id}"
+               + (" (reused)" if result.reused_eval else ""))
+    click.echo(f"Published run   {result.run_id}")
+    click.echo(f"Dataset asset   {result.dataset_ref.asset_id}"
+               + (" (reused)" if result.reused_dataset else ""))
+    click.echo(f"Registered {len(result.evaluator_refs)} evaluator(s)"
+               + (f", {len(result.reused_evaluators)} reused" if result.reused_evaluators else "")
+               + ":")
+    for ref in result.evaluator_refs:
+        marker = " (reused)" if ref.evaluator_name in set(result.reused_evaluators) else ""
+        click.echo(f"  - {ref.evaluator_name} v{ref.evaluator_version} ({ref.variant}){marker}")
+
+
 @cli.group(cls=SuggestingGroup, short_help="Generate and validate ACS policies from ASSERT findings")
 def acs():
     """Generate deployable ACS policies from ASSERT findings.
