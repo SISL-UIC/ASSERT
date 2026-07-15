@@ -106,6 +106,23 @@ def _load_acs_symbol(name: str) -> Any:
         _handle_missing_acs_dependency(exc)
 
 
+def _handle_missing_foundry_dependency(exc: ModuleNotFoundError) -> None:
+    missing = getattr(exc, "name", "") or "Foundry extra"
+    _error(
+        f"Could not import Foundry dependency '{missing}'. Install the Foundry extra first, for example:\n"
+        "  python -m pip install -e \".[foundry]\""
+    )
+
+
+def _load_foundry_symbol(name: str) -> Any:
+    try:
+        import assert_ai.integrations.foundry as foundry
+
+        return getattr(foundry, name)
+    except ModuleNotFoundError as exc:
+        _handle_missing_foundry_dependency(exc)
+
+
 def _console(*, no_color: bool = False) -> Console:
     return Console(highlight=False, color_system=None if no_color else "auto")
 
@@ -1407,6 +1424,21 @@ def results_compare_suites(
             f"{s['with_tools']}/{s['inference_rows']}",
         )
     console.print(struct_table)
+
+
+@cli.group(cls=SuggestingGroup, short_help="Publish ASSERT runs to an Azure AI Foundry project")
+def foundry():
+    """Publish a completed ASSERT run to an Azure AI Foundry project.
+
+    Subcommands register ASSERT judge dimensions as versioned custom
+    evaluators, upload the scored rows as a Foundry dataset asset, and
+    POST the eval + eval.run that binds them. Foundry then renders per-
+    dimension scores in its Evaluations tab.
+
+    Requires the ``foundry`` extra: ``pip install -e ".[foundry]"``.
+    Currently populated by follow-up commits; ``--help`` works without
+    the extra installed.
+    """
 
 
 @cli.group(cls=SuggestingGroup, short_help="Generate and validate ACS policies from ASSERT findings")
