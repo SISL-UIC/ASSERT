@@ -23,6 +23,7 @@ class FrozenUpstreamConfigTest(unittest.TestCase):
                 upstream_model="azure/gpt-5.4",
                 target_dir=Path(tmp),
                 freeze_upstream=True,
+                target_callable_override=rt.REGRESSION_ASYNC_TARGET,
             )
             cfg = yaml.safe_load(rendered.read_text(encoding="utf-8"))
             ctx = runner._load_context(config=str(rendered))
@@ -32,6 +33,11 @@ class FrozenUpstreamConfigTest(unittest.TestCase):
         self.assertFalse(pipeline["test_set"]["enabled"])
         self.assertTrue(pipeline["inference"].get("enabled", True))
         self.assertTrue(pipeline["judge"].get("enabled", True))
+        self.assertEqual(
+            pipeline["inference"]["target"]["callable"],
+            rt.REGRESSION_ASYNC_TARGET,
+        )
+        self.assertEqual(pipeline["inference"]["tool_timeout_s"], 180.0)
         enabled_stages = [
             name for name, raw_cfg in ctx["stages"] if raw_cfg.get("enabled", True)
         ]

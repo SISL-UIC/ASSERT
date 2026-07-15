@@ -75,6 +75,12 @@ SHARED_UPSTREAM_FILES: tuple[str, ...] = (
 REQUIRED_SHARED_UPSTREAM_FILES: tuple[str, ...] = ("taxonomy.json", "test_set.jsonl")
 DEFAULT_BASELINE_CACHE_DIR = Path("artifacts/regression-baselines")
 TREATMENT_RESULTS_DIR = Path("artifacts/regression-runs")
+TRAVEL_PLANNER_SYNC_TARGET = "examples.travel_planner_langgraph.auto_trace:chat_sync"
+REGRESSION_ASYNC_TARGET = "_science_regression_target:chat"
+REGRESSION_TARGET_MODULE = """\
+from examples.travel_planner_langgraph import auto_trace as _auto_trace
+from examples.travel_planner_langgraph.agent import chat
+"""
 
 
 @dataclass(frozen=True)
@@ -237,6 +243,7 @@ def _render_config(
     upstream_model: str,
     target_dir: Path,
     freeze_upstream: bool = False,
+    target_callable_override: str | None = None,
 ) -> Path:
     """Materialise a per-run YAML with the requested overrides.
 
@@ -285,7 +292,17 @@ def _render_config(
         pipeline.setdefault("systematize", {})["enabled"] = False
         test_set_cfg["enabled"] = False
     inference = pipeline.setdefault("inference", {})
+    target = inference.setdefault("target", {})
+    if (
+        target_callable_override
+        and target.get("callable") == TRAVEL_PLANNER_SYNC_TARGET
+    ):
+        target["callable"] = target_callable_override
     inference.setdefault("tester", {}).setdefault("model", {})["name"] = upstream_model
+    inference["tool_timeout_s"] = min(
+        float(inference.get("tool_timeout_s") or 180),
+        180.0,
+    )
     # Bump inference concurrency so test_set=200 finishes in workflow timeout.
     inference["concurrency"] = max(int(inference.get("concurrency", 2) or 2), 10)
 
@@ -337,6 +354,10 @@ def run_pipeline(
     worktree = ensure_worktree(commit_sha)
     rel = config.resolve().relative_to(REPO_ROOT)
     config_in_wt = worktree / rel
+    (worktree / "_science_regression_target.py").write_text(
+        REGRESSION_TARGET_MODULE,
+        encoding="utf-8",
+    )
     suite_name = suite_dir.name  # unique per (config, commit, hash) tuple
     rendered = _render_config(
         config_in_wt,
@@ -350,6 +371,7 @@ def run_pipeline(
         # the source.
         target_dir=config_in_wt.parent,
         freeze_upstream=frozen_upstream_dir is not None,
+        target_callable_override=REGRESSION_ASYNC_TARGET,
     )
 
     worktree_suite_dir = worktree / "artifacts" / "results" / suite_name

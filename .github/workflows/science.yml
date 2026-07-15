@@ -14,8 +14,9 @@
 # Phase 2 (engineer follow-up): drop `continue-on-error`.
 #
 # Sample sizes via PR labels:
+#   test_set:20    — default PR smoke run
 #   test_set:50    — quick iteration (~6 min per commit)
-#   test_set:100   — default
+#   test_set:100   — scheduled/manual default
 #   test_set:200   — pre-release
 #   test_set:500   — nightly / calibration
 #
@@ -45,6 +46,9 @@ on:
 concurrency:
   group: science-${{ github.event_name }}-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
+
+permissions:
+  contents: read
 
 env:
   AZURE_API_KEY: ${{ secrets.AZURE_API_KEY }}
@@ -124,6 +128,7 @@ jobs:
         run: |
           TEST_SET=100
           if [ "$EVENT_NAME" = "pull_request" ]; then
+            TEST_SET=20
             for label in $PR_LABELS; do
               case $label in
                 test_set:*) TEST_SET="${label#test_set:}" ;;
