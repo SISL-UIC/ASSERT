@@ -852,6 +852,30 @@ def test_push_eval_metadata_carries_suite_context() -> None:
     assert eval_meta["assert.row_count"] == "1"
 
 
+def test_bounded_record_truncates_on_utf8_byte_boundary() -> None:
+    """Metadata values must fit under Foundry's per-value byte cap (512)."""
+    from assert_ai.integrations.foundry.pipeline import _bounded_record
+
+    # ASCII: 600 chars = 600 bytes ⇒ trimmed to 512 bytes total including "…".
+    ascii_600 = "x" * 600
+    # Multi-byte: 300 chars of a 3-byte code point = 900 bytes.
+    multibyte_300 = "\u4e2d" * 300  # "中" is 3 bytes in UTF-8.
+
+    result = _bounded_record(
+        [
+            ("short", "ok"),
+            ("ascii", ascii_600),
+            ("multi", multibyte_300),
+        ]
+    )
+
+    assert result["short"] == "ok"
+    for key in ("ascii", "multi"):
+        value = result[key]
+        assert value.endswith("…"), (key, value[-5:])
+        assert len(value.encode("utf-8")) <= 512, (key, len(value.encode("utf-8")))
+
+
 def test_push_run_data_source_wires_dataset_asset_id() -> None:
     client = _fake_client()
 

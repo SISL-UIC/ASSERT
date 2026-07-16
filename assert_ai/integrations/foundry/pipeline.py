@@ -851,14 +851,27 @@ def _run_metadata(run: AssertRun, *, dataset_version: str) -> dict[str, str]:
 
 
 def _bounded_record(entries: Iterable[tuple[str, str]]) -> dict[str, str]:
-    """Foundry Metadata: at most 16 keys, at most 512 chars per value."""
+    """Foundry Metadata: at most 16 keys, at most 512 UTF-8 bytes per value.
+
+    Values that fit under the byte cap pass through unchanged.
+    Longer values are truncated to at most 509 bytes plus a
+    3-byte ellipsis (``…`` = ``\\xe2\\x80\\xa6``) — a total of 512
+    bytes — with the truncation performed on a UTF-8 code-point
+    boundary so we don't leave a partial multi-byte character.
+    """
     result: dict[str, str] = {}
+    ellipsis = "…"
+    ellipsis_bytes = len(ellipsis.encode("utf-8"))  # 3
+    max_bytes = 512
     for key, value in entries:
         if not value:
             continue
         text = str(value)
-        if len(text) > 512:
-            text = text[:511] + "…"
+        encoded = text.encode("utf-8")
+        if len(encoded) > max_bytes:
+            trimmed = encoded[: max_bytes - ellipsis_bytes]
+            # Drop trailing partial UTF-8 continuation bytes so decode succeeds.
+            text = trimmed.decode("utf-8", errors="ignore") + ellipsis
         result[key] = text
     if len(result) > 16:
         # This is a coding bug — the mapper's key set is bounded.
@@ -948,10 +961,19 @@ def _dict_get(obj: Any, key: str, default: Any) -> Any:
     SDK models expose fields as attributes AND MutableMapping keys,
     but pagination iterators may return plain dicts in some paths.
     Uniform accessor keeps callers simple.
+
+    Bound methods and other callables under a field name are
+    treated as "field absent" — otherwise ``obj.name`` on a model
+    that exposes both a ``name`` field and a ``name()`` method
+    would return the bound method. The fingerprint path in
+    particular reads fields that legitimately can be callables
+    only in the SDK-model sense (never in the plain-dict path),
+    so falling through to ``__getitem__`` on a method match is
+    the correct behavior.
     """
     if hasattr(obj, key):
         value = getattr(obj, key, None)
-        if value is not None:
+        if value is not None and not callable(value):
             return value
     try:
         return obj[key]  # type: ignore[index]
@@ -960,12 +982,21 @@ def _dict_get(obj: Any, key: str, default: Any) -> Any:
 
 
 def _iter_paged(list_fn: Any, **kwargs: Any) -> Iterable[Any]:
-    """Yield every item in an SDK pager, tolerating both paged + eager returns."""
+    """Yield every item in an SDK pager, tolerating both paged + eager returns.
+
+    If the SDK method's signature doesn't accept our kwargs (fake
+    clients in tests, or older SDK versions), retry without kwargs.
+    Only unrecognized-argument TypeErrors trigger the retry — other
+    TypeErrors surface unchanged so a genuine bug isn't swallowed.
+    """
     try:
         result = list_fn(**kwargs)
-    except TypeError:
-        # Some list_fns don't accept our kwargs — retry without.
-        result = list_fn()
+    except TypeError as exc:
+        message = str(exc).lower()
+        if "unexpected keyword" in message or "got an unexpected" in message:
+            result = list_fn()
+        else:
+            raise
     if result is None:
         return
     yield from result
