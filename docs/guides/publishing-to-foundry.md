@@ -313,16 +313,32 @@ The pusher itself validates the `data_mapping` regex locally
 before submitting, so the message really is a Foundry-side stale
 association.
 
-### `Evaluator drift detected: got type=rubric, expected type=code`
+### New evaluator versions appearing in the catalog
 
-You upgraded from a v1-era pusher that registered `assert-{dim}`
-as `type: rubric`. The v2 pusher detects any semantic drift
-between the stored evaluator and the spec it's about to send —
-type change, `code_text` / `prompt_text` change, `data_schema`
-widening, `init_parameters` change — and delete+recreates on
-mismatch. Description prose is UI-only and excluded from the
-drift check. This message means the delete+recreate succeeded on
-the current push. Nothing to do.
+Each time the ASSERT-side spec for a dimension changes — most
+commonly because you edited the rubric in `config.yaml` — the
+pusher registers a new evaluator version rather than overwriting
+the existing one. Old versions stay intact, so historical eval
+runs pinned to them keep rendering their original grader body in
+the Foundry UI. If you want a specific eval to score against the
+new version, create a new eval by bumping `--eval-name`.
+
+Detection is fingerprint-based: the pusher SHA-256s
+`type + code_text + prompt_text + data_schema + init_parameters + metrics`
+and reuses any existing version with a matching fingerprint. UI
+prose (`description`, `display_name`) is excluded from the
+fingerprint on purpose, so pure-prose edits don't churn versions.
+
+To preview which evaluators would drift on the next push without
+touching Foundry, dry-run with `--json` and diff the
+`fingerprint` field across pushes:
+
+```bash
+assert-ai foundry push RUN --project P --dry-run --json > /tmp/fp.json
+# edit config.yaml
+assert-ai foundry push RUN --project P --dry-run --json > /tmp/fp-after.json
+diff <(jq '.evaluators' /tmp/fp.json) <(jq '.evaluators' /tmp/fp-after.json)
+```
 
 ### `Testing criteria drift on existing eval`
 

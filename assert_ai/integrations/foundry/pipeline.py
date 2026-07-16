@@ -413,67 +413,122 @@ def _ensure_evaluators(
     evaluators_op: Any,
     specs: Sequence[AssertEvaluatorSpec],
 ) -> tuple[list[EvaluatorRef], list[str]]:
-    """Register each spec unless the named+version already exists as an exact match.
+    """Register each spec at a content-addressed evaluator version.
 
     Foundry's evaluator name+version is the identity: name and
-    version together identify one immutable definition. If the same
-    ``assert-{dim}[/-rescore]`` at version ``"1"`` already exists in
-    the catalog **and its definition fingerprints byte-identical to
-    what we would send**, reuse it.
+    version together identify one immutable definition. We use that
+    immutability to keep historical eval runs reproducible:
 
-    We compare a stable fingerprint over the semantic fields of
-    ``definition`` (see :func:`_definition_fingerprint`) rather than
-    just the type. Any drift — old ASSERT v1 ``rubric`` shape, a
-    change in ``code_text``, an edited prompt rubric, a widened
-    ``data_schema``, or new ``init_parameters`` — flips the
-    fingerprint and forces a ``delete_version`` +
-    ``create_version``.
+    1. List every existing version for the evaluator name.
+    2. If any existing version's semantic fingerprint
+       (:func:`_definition_fingerprint`) matches the current spec,
+       reuse that version — its resulting :class:`EvaluatorRef`
+       carries the matched version string so downstream
+       testing_criteria pin the same body a customer edited against.
+    3. If no existing version matches, register the spec at
+       ``max(existing) + 1`` (or ``"1"`` on a fresh name). Old
+       versions stay intact: prior eval runs whose testing_criteria
+       pin the old version continue to render their original grader
+       body in the Foundry UI, and never silently swap graders.
 
-    Description text and display names are UI-only and are
-    excluded from the fingerprint on purpose: a customer editing
-    prose in their config shouldn't trigger a delete+recreate as
-    long as the scoring behavior is unchanged.
-
-    Callers who want a fresh registration can also delete the
-    version in the Foundry UI before pushing.
+    The fingerprint deliberately excludes UI-only fields
+    (``description``, ``display_name``) so that editing rubric
+    prose that doesn't affect scoring behavior doesn't churn
+    versions. Rubric edits that mutate ``prompt_text`` still bump
+    the version, which is the correct semantics.
     """
     refs: list[EvaluatorRef] = []
     reused: list[str] = []
     for spec in specs:
         name = spec.evaluator_name
-        version = "1"
         expected_fingerprint = _definition_fingerprint(spec.evaluator_version)
-        existing = _get_evaluator_version(evaluators_op, name=name, version=version)
-        if existing is None:
-            evaluators_op.create_version(name, spec.evaluator_version)
-        elif _definition_fingerprint(existing) == expected_fingerprint:
+
+        existing_versions = _list_evaluator_versions(evaluators_op, name=name)
+        matching = _find_matching_version(existing_versions, expected_fingerprint)
+
+        if matching is not None:
+            resolved_version = matching
             reused.append(name)
         else:
-            # Definition has drifted — delete and re-register so
-            # downstream eval-create doesn't run against a stale
-            # schema, and so new eval runs pick up the current
-            # grader logic / rubric.
-            evaluators_op.delete_version(name, version)
+            resolved_version = _next_version_number(existing_versions)
+            # The SDK's create_version reads the version off the payload's
+            # `version` attribute (best-effort; the service assigns the
+            # canonical version regardless). Set it so the stored version
+            # matches what we intend to reference in testing_criteria.
+            try:
+                setattr(spec.evaluator_version, "version", resolved_version)
+            except (AttributeError, TypeError):
+                pass
             evaluators_op.create_version(name, spec.evaluator_version)
+
         refs.append(
             EvaluatorRef(
                 dimension_id=spec.dimension_id,
                 variant=spec.variant,
                 evaluator_name=name,
-                evaluator_version=version,
+                evaluator_version=resolved_version,
             )
         )
     return refs, reused
 
 
-def _get_evaluator_version(
-    evaluators_op: Any, *, name: str, version: str
-) -> Any | None:
-    """Return the SDK object for name/version, or ``None`` when not found."""
-    try:
-        return evaluators_op.get_version(name, version)
-    except _resource_not_found_types():
-        return None
+def _list_evaluator_versions(evaluators_op: Any, *, name: str) -> list[Any]:
+    """List every existing version for ``name``; empty list on 404 or missing SDK support.
+
+    Uses ``list_versions`` when available (real SDK path) and falls
+    back to iterating ``get_version(name, "1")..."2"..."N"`` on
+    test fakes that don't implement paginated listing.
+    """
+    lister = getattr(evaluators_op, "list_versions", None)
+    if callable(lister):
+        try:
+            return list(_iter_paged(lister, name=name))
+        except _resource_not_found_types():
+            return []
+        except Exception:
+            # Some fakes raise TypeError on unexpected kwargs; fall
+            # through to the enumerate path below.
+            pass
+
+    # Fallback: enumerate 1..N until we hit a not-found. Used by
+    # test fakes that only implement get_version.
+    versions: list[Any] = []
+    for candidate in range(1, 1000):
+        try:
+            versions.append(evaluators_op.get_version(name, str(candidate)))
+        except _resource_not_found_types():
+            break
+    return versions
+
+
+def _find_matching_version(existing_versions: Sequence[Any], expected_fingerprint: str) -> str | None:
+    """Return the ``version`` string of the first existing entry with the same fingerprint."""
+    for ev in existing_versions:
+        if _definition_fingerprint(ev) == expected_fingerprint:
+            version_value = _dict_get(ev, "version", None)
+            if version_value is not None:
+                return str(version_value)
+    return None
+
+
+def _next_version_number(existing_versions: Sequence[Any]) -> str:
+    """Return ``str(max(existing) + 1)``, or ``"1"`` when the name is fresh.
+
+    Skips non-numeric versions defensively — Foundry historically
+    used string identifiers on some resource kinds. When mixed
+    numeric/non-numeric versions are present, we bump past the
+    highest observed integer.
+    """
+    max_seen = 0
+    for ev in existing_versions:
+        version_value = _dict_get(ev, "version", None)
+        try:
+            candidate = int(str(version_value))
+        except (TypeError, ValueError):
+            continue
+        if candidate > max_seen:
+            max_seen = candidate
+    return str(max_seen + 1)
 
 
 def _definition_fingerprint(evaluator_version: Any) -> str:

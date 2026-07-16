@@ -64,32 +64,38 @@ identity all work.
 | # | Call | Purpose |
 |---|------|---------|
 | 1 | `AIProjectClient(endpoint=..., credential=...)` | Construct the data-plane client. |
-| 2 | `project_client.beta.evaluators.get_version(name, "1")` | Check whether the custom evaluator already exists (per dimension, per variant). |
-| 3 | `project_client.beta.evaluators.delete_version(name, "1")` | Drop a stale evaluator when its `definition.type` doesn't match the expected variant (see [drift detection](#evaluator-drift-detection)). |
-| 4 | `project_client.beta.evaluators.create_version(name, EvaluatorVersion(...))` | Register the evaluator when step 2 returned 404 or after step 3. |
-| 5 | `project_client.datasets.get(name, version)` | Check whether the dataset asset already exists at this content hash. |
-| 6 | `project_client.datasets.upload_file(name=..., version=..., file_path=...)` | Upload the JSONL when step 5 returned 404. The SDK handles startPendingUpload + SAS PUT + register internally. |
-| 7 | `openai_client.evals.list(order="desc")` | Page the project's evals to reuse an existing eval by name. |
-| 8 | `openai_client.evals.create(name=..., data_source_config=..., testing_criteria=..., metadata=...)` | Create the eval definition when name isn't found. Fails loudly if an eval with this name exists but has different testing_criteria — Foundry's `POST /evals/{id}` only accepts name+metadata updates, not `testing_criteria`. |
-| 9 | `openai_client.evals.runs.create(eval_id, data_source=..., name=..., metadata=...)` | Always POST a new run per push. |
+| 2 | `project_client.beta.evaluators.list_versions(name)` | Enumerate every existing version for the evaluator name (per dimension, per variant). |
+| 3 | `project_client.beta.evaluators.create_version(name, EvaluatorVersion(version=<next>, ...))` | Register the spec at `max(existing) + 1` when no existing version has a matching fingerprint (see [drift detection](#evaluator-drift-detection)). Skipped when a matching version already exists. |
+| 4 | `project_client.datasets.get(name, version)` | Check whether the dataset asset already exists at this content hash. |
+| 5 | `project_client.datasets.upload_file(name=..., version=..., file_path=...)` | Upload the JSONL when step 4 returned 404. The SDK handles startPendingUpload + SAS PUT + register internally. |
+| 6 | `openai_client.evals.list(order="desc")` | Page the project's evals to reuse an existing eval by name. |
+| 7 | `openai_client.evals.create(name=..., data_source_config=..., testing_criteria=..., metadata=...)` | Create the eval definition when name isn't found. Fails loudly if an eval with this name exists but has different testing_criteria — Foundry's `POST /evals/{id}` only accepts name+metadata updates, not `testing_criteria`. |
+| 8 | `openai_client.evals.runs.create(eval_id, data_source=..., name=..., metadata=...)` | Always POST a new run per push. |
 
-Steps 2–4 repeat once per evaluator spec. Steps 5–6 fire once per
-push. Steps 7–9 fire exactly once per push.
+Steps 2–3 repeat once per evaluator spec. Steps 4–5 fire once per
+push. Steps 6–8 fire exactly once per push.
 
 The base URL is derived from the project ARM ID:
 `https://{account}.services.ai.azure.com/api/projects/{project}`.
 
 ### Idempotency
 
-- **Evaluators**: GET-then-POST. Existing versions with matching
-  variant are reused. Stale versions with mismatched
-  `definition.type` are deleted + recreated (see below).
+- **Evaluators**: content-addressed by fingerprint. `list_versions`
+  is scanned for a match; any prior version with the same
+  fingerprint is reused so re-pushes of the same spec never churn.
+  Drift registers a new version at `max(existing) + 1` — old
+  versions are **never deleted**. Historical eval runs pinned to
+  a prior version continue to render their original grader body
+  in the Foundry UI.
 - **Dataset**: content-addressed. Version is
   `sha256(payload_bytes)[:12]` — identical row content ⇒ identical
   version ⇒ existing dataset asset is reused with no re-upload.
 - **Eval**: name-based lookup with a strict criteria-match check.
   Reused on match; fails loudly on drift with a message pointing at
-  `--eval-name suite-v2`.
+  `--eval-name suite-v2`. Because testing_criteria pin a specific
+  `evaluator_version`, using a new evaluator version generally
+  means a new eval too — the drift path composes naturally with
+  the `--eval-name` bump.
 - **Run**: always new. One eval, many runs — the Foundry UI renders
   run-over-run trends.
 
@@ -101,28 +107,39 @@ evaluators as `type: rubric`. v2 registers them as `type: code` (or
 evaluator body (`code_text` / `prompt_text` / `data_schema` /
 `init_parameters` / `metrics`) can drift between pushes when a
 customer edits a rubric, upgrades the SDK, or changes their judge
-config. Foundry treats `definition.type` as immutable per
-name+version and can silently return stale grader logic on GET, so
-"reuse if exists" would produce a mismatch either way — an opaque
-eval-create failure downstream, or new eval runs scored against
-outdated grader code.
+config.
 
-The pipeline handles this by computing a **12-char fingerprint**
-over the semantic definition fields (SHA-256 of the canonicalized
-JSON of `type` + `code_text` + `prompt_text` + `data_schema` +
-`init_parameters` + `metrics`) on every GET, and comparing against
-the fingerprint of the spec it's about to send. On mismatch it
-deletes the stale version and re-registers with the current spec.
-Reused status is only marked when the fingerprints match
-byte-identical.
+Foundry treats evaluator versions as immutable per name+version.
+The pipeline turns that immutability into the audit trail:
+
+1. On every push, `list_versions(name)` returns every existing
+   version for the evaluator name.
+2. The pipeline computes a **12-char fingerprint** over the
+   semantic definition fields (SHA-256 of the canonicalized JSON
+   of `type` + `code_text` + `prompt_text` + `data_schema` +
+   `init_parameters` + `metrics`) for the current spec.
+3. If any existing version's fingerprint matches, that version
+   is reused. The resulting `EvaluatorRef.evaluator_version`
+   carries the matched version string, so downstream
+   `testing_criteria` pin the exact evaluator body a customer
+   registered against.
+4. If no existing version matches, the spec is registered at
+   `max(existing) + 1`. **No delete calls are ever issued** —
+   prior versions are preserved so historical eval runs stay
+   reproducible.
+
+Because `testing_criteria` in an existing eval pin a specific
+`evaluator_version`, adopting a new evaluator version in scored
+runs typically means creating a new eval (which the eval-drift
+check already forces via `--eval-name` bump). Old evals continue
+to run against the version they were created with.
 
 The `description` and `display_name` fields are **excluded from
 the fingerprint on purpose** because they're UI-only and don't
-affect scoring behavior. A customer editing rubric prose in their
-config won't force a delete+recreate cycle on every push unless
-that edit also mutates the prompt-variant's `prompt_text` (which
-it typically will, since the rubric is inlined into the prompt
-template).
+affect scoring behavior. Editing rubric prose in the ASSERT
+config won't churn evaluator versions unless the edit also
+mutates the prompt-variant's `prompt_text` (which it typically
+will, since the rubric is inlined into the prompt template).
 
 ## Custom evaluator specs
 
@@ -367,8 +384,13 @@ One entry per registered evaluator. All entries use `type:
 - **`evaluator_name` is the SHORT name** (`assert-policy_violation`),
   NOT the full `azureai://…` URI. The URI form returns
   `EvaluatorNotFound` at eval-create time.
-- **`evaluator_version`** is a separate field. `"1"` by default;
-  never bumped by the pipeline.
+- **`evaluator_version`** is a separate field. It's the version
+  string of the currently-matching evaluator content
+  (`"1"` for the first registration; `"2"`, `"3"`, ... after
+  drift-triggered version bumps). Each eval pins its
+  testing_criteria to a specific version, so eval runs stay
+  reproducible even as new evaluator versions are registered
+  under the same name.
 - **`data_mapping`** values are validated against the regex
   `^\{\{(?:item|sample)\.[a-zA-Z0-9_]+(?:\.[a-zA-Z0-9_]+)*\}\}$`.
   `{{item}}` alone fails; only dotted paths pass.
