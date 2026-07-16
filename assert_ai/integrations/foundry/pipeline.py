@@ -550,8 +550,8 @@ def _definition_fingerprint(evaluator_version: Any) -> str:
     definition = _dict_get(evaluator_version, "definition", {}) or {}
     canonical = {
         "type": str(_dict_get(definition, "type", "") or "").lower(),
-        "code_text": _to_plain(_dict_get(definition, "code_text", None)),
-        "prompt_text": _to_plain(_dict_get(definition, "prompt_text", None)),
+        "code_text": _to_plain(_dict_get(definition, "code_text", None)) or "",
+        "prompt_text": _to_plain(_dict_get(definition, "prompt_text", None)) or "",
         "data_schema": _to_plain(_dict_get(definition, "data_schema", {})),
         "init_parameters": _to_plain(_dict_get(definition, "init_parameters", {})),
         "metrics": _to_plain(_dict_get(definition, "metrics", {})),
@@ -565,10 +565,24 @@ def _to_plain(value: Any) -> Any:
 
     SDK models expose ``as_dict()`` when available; otherwise we
     walk mappings and sequences by hand. Scalars pass through
-    unchanged.
+    unchanged with two normalizations that Foundry itself performs
+    on the wire, so the sent and stored fingerprints match:
+
+    - ``None`` → ``""`` for text-body fields. Foundry normalizes
+      the *other* variant's absent body (``prompt_text`` on a code
+      evaluator, ``code_text`` on a prompt evaluator) to an empty
+      string in its response, while our specs leave it as ``None``.
+    - ``int`` → ``float`` for numeric scalars other than ``bool``.
+      Foundry normalizes integer bounds like ``min_value=1`` to
+      ``1.0`` in metric definitions.
     """
     if value is None:
         return None
+    if isinstance(value, bool):
+        # bool is a subclass of int — keep as-is.
+        return value
+    if isinstance(value, int):
+        return float(value)
     if hasattr(value, "as_dict") and callable(value.as_dict):
         try:
             return _to_plain(value.as_dict())

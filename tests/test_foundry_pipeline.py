@@ -26,6 +26,7 @@ from assert_ai.integrations.foundry.pipeline import (
     PushError,
     PushResult,
     RUN_NAME_PREFIX,
+    _definition_fingerprint,
     default_dataset_name,
     default_eval_name,
     default_run_name,
@@ -705,6 +706,54 @@ def test_push_ignores_description_only_drift() -> None:
     # No re-registration because the fingerprint matched.
     assert not any(name == "assert-policy_violation" for name, _ in client.beta.evaluators.created)
     assert "assert-policy_violation" in result.reused_evaluators
+
+
+# ── Fingerprint round-trip normalization ────────────────────────────
+
+
+def test_fingerprint_matches_across_int_float_metric_bounds() -> None:
+    """Foundry echoes ``min_value=1`` back as ``1.0``. Fingerprint must ignore that.
+
+    The ordinal metric on the prompt variant is registered with
+    integer bounds, but Foundry normalizes them to floats on the
+    wire. If the fingerprint hashed ints and floats differently,
+    every subsequent push would register a new version even though
+    the grader body is unchanged.
+    """
+    spec = build_prompt_evaluator_spec(
+        "policy_violation", description="x", rubric_prose="Score 1-5."
+    )
+    sent = spec.evaluator_version
+    sent_fp = _definition_fingerprint(sent)
+
+    # Now imagine Foundry echoed the same evaluator back with float bounds.
+    fetched = build_prompt_evaluator_spec(
+        "policy_violation", description="x", rubric_prose="Score 1-5."
+    ).evaluator_version
+    fetched.definition.metrics["result"].min_value = 1.0
+    fetched.definition.metrics["result"].max_value = 5.0
+    fetched_fp = _definition_fingerprint(fetched)
+
+    assert sent_fp == fetched_fp
+
+
+def test_fingerprint_matches_when_opposite_body_field_is_empty_string() -> None:
+    """Foundry echoes ``prompt_text=None`` back as ``prompt_text=""`` on code evaluators.
+
+    Symmetrically, ``code_text=None`` on a prompt evaluator can
+    come back as ``""``. The fingerprint must treat the two as
+    equivalent, otherwise every push after the first would register
+    a new version.
+    """
+    fresh = build_code_evaluator_spec("policy_violation", description="x").evaluator_version
+    fresh_fp = _definition_fingerprint(fresh)
+
+    # Simulate what Foundry returns: prompt_text normalized to "".
+    echoed = build_code_evaluator_spec("policy_violation", description="x").evaluator_version
+    echoed.definition.prompt_text = ""
+    echoed_fp = _definition_fingerprint(echoed)
+
+    assert fresh_fp == echoed_fp
 
 
 def test_push_uploads_dataset_when_content_hash_new() -> None:
