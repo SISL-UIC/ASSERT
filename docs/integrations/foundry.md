@@ -97,16 +97,32 @@ The base URL is derived from the project ARM ID:
 
 The v1 branch (kept local, not shipped) registered `assert-{dim}`
 evaluators as `type: rubric`. v2 registers them as `type: code` (or
-`type: prompt` for the `-rescore` variant). Foundry treats
-`definition.type` as immutable per name+version, so a silent reuse
-of a stale `rubric` evaluator would trigger an opaque validation
-failure downstream on `evals.create`.
+`type: prompt` for the `-rescore` variant). More generally, the
+evaluator body (`code_text` / `prompt_text` / `data_schema` /
+`init_parameters` / `metrics`) can drift between pushes when a
+customer edits a rubric, upgrades the SDK, or changes their judge
+config. Foundry treats `definition.type` as immutable per
+name+version and can silently return stale grader logic on GET, so
+"reuse if exists" would produce a mismatch either way — an opaque
+eval-create failure downstream, or new eval runs scored against
+outdated grader code.
 
-The pipeline handles this by comparing the fetched evaluator's
-`definition.type` against the expected variant type on every GET. On
-mismatch it deletes the stale version and re-registers with the
-current spec. Reused status is only marked when both
-`(name, version)` and `definition.type` match.
+The pipeline handles this by computing a **12-char fingerprint**
+over the semantic definition fields (SHA-256 of the canonicalized
+JSON of `type` + `code_text` + `prompt_text` + `data_schema` +
+`init_parameters` + `metrics`) on every GET, and comparing against
+the fingerprint of the spec it's about to send. On mismatch it
+deletes the stale version and re-registers with the current spec.
+Reused status is only marked when the fingerprints match
+byte-identical.
+
+The `description` and `display_name` fields are **excluded from
+the fingerprint on purpose** because they're UI-only and don't
+affect scoring behavior. A customer editing rubric prose in their
+config won't force a delete+recreate cycle on every push unless
+that edit also mutates the prompt-variant's `prompt_text` (which
+it typically will, since the rubric is inlined into the prompt
+template).
 
 ## Custom evaluator specs
 

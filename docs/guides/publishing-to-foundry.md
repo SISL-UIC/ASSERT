@@ -316,10 +316,13 @@ association.
 ### `Evaluator drift detected: got type=rubric, expected type=code`
 
 You upgraded from a v1-era pusher that registered `assert-{dim}`
-as `type: rubric`. The v2 pusher detects the drift, deletes the
-stale version, and re-registers with the current spec — this
-message means the delete+recreate succeeded on the current push.
-Nothing to do.
+as `type: rubric`. The v2 pusher detects any semantic drift
+between the stored evaluator and the spec it's about to send —
+type change, `code_text` / `prompt_text` change, `data_schema`
+widening, `init_parameters` change — and delete+recreates on
+mismatch. Description prose is UI-only and excluded from the
+drift check. This message means the delete+recreate succeeded on
+the current push. Nothing to do.
 
 ### `Testing criteria drift on existing eval`
 

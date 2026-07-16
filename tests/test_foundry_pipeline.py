@@ -12,7 +12,11 @@ from typing import Any, Iterable
 import pytest
 
 from assert_ai.integrations.foundry.artifacts import AssertRun
-from assert_ai.integrations.foundry.evaluators import AssertEvaluatorSpec
+from assert_ai.integrations.foundry.evaluators import (
+    AssertEvaluatorSpec,
+    build_code_evaluator_spec,
+    build_prompt_evaluator_spec,
+)
 from assert_ai.integrations.foundry.pipeline import (
     DATASET_NAME_PREFIX,
     DatasetRef,
@@ -421,21 +425,35 @@ def test_push_registers_evaluators_when_missing() -> None:
 
 
 def _existing_evaluator(definition_type: str) -> dict[str, Any]:
-    """A minimal SDK-shaped evaluator version stub with the requested type."""
+    """A minimal SDK-shaped evaluator version stub with the requested type.
+
+    Deliberately sparse — everything else is missing so this stub's
+    fingerprint will never match a real spec's fingerprint. Used for
+    stale-shape drift tests where the whole point is that
+    ``get_version`` returns something the pipeline should reject.
+    """
     return {"definition": {"type": definition_type}}
 
 
-def test_push_reuses_existing_evaluators() -> None:
-    """GET-first idempotency: pre-existing versions with matching variant are reused."""
-    existing_ev = {
-        ("assert-overrefusal", "1"): _existing_evaluator("code"),
-        ("assert-overrefusal-rescore", "1"): _existing_evaluator("prompt"),
-        ("assert-policy_violation", "1"): _existing_evaluator("code"),
-        ("assert-policy_violation-rescore", "1"): _existing_evaluator("prompt"),
-    }
-    client = _fake_client(existing_evaluators=existing_ev)
+def _existing_evaluators_matching_run(run: AssertRun) -> dict[tuple[str, str], Any]:
+    """Seed pre-existing evaluators whose fingerprints match what the pipeline would build.
 
-    result = push_run(_make_run(), project_client=client)
+    Runs the same spec builder the pipeline uses so the stored
+    ``evaluator_version`` fingerprints byte-identical to the freshly
+    built one. That's the setup the "reuses existing" test needs.
+    """
+    from assert_ai.integrations.foundry.evaluators import build_evaluator_specs_for_run
+
+    specs = build_evaluator_specs_for_run(run, mode="both")
+    return {(spec.evaluator_name, "1"): spec.evaluator_version for spec in specs}
+
+
+def test_push_reuses_existing_evaluators() -> None:
+    """GET-first idempotency: pre-existing versions with matching fingerprint are reused."""
+    run = _make_run()
+    client = _fake_client(existing_evaluators=_existing_evaluators_matching_run(run))
+
+    result = push_run(run, project_client=client)
 
     assert client.beta.evaluators.created == []  # nothing re-registered
     assert client.beta.evaluators.deleted == []  # nothing dropped for drift
@@ -469,6 +487,77 @@ def test_push_replaces_stale_rubric_evaluator_with_code_variant() -> None:
     assert "assert-policy_violation" in created_names
     # It's not counted as "reused" because we had to replace it.
     assert "assert-policy_violation" not in result.reused_evaluators
+
+
+def test_push_replaces_evaluator_when_code_text_drifts() -> None:
+    """Same type, different grader body ⇒ fingerprint mismatch ⇒ delete + re-register.
+
+    Mutates the ``code_text`` of a pre-existing code evaluator so it
+    fingerprints differently from the fresh spec. The pipeline must
+    detect the drift on GET, drop the stale version, and re-register
+    with the current grader.
+    """
+    stale_spec = build_code_evaluator_spec("policy_violation", description="whatever")
+    stale_version = stale_spec.evaluator_version
+    # Same type + schema, but a manually-mutated grader body.
+    stale_version.definition.code_text = "def grade(sample, item):\n    return 0.5\n"
+    stale = {("assert-policy_violation", "1"): stale_version}
+    client = _fake_client(existing_evaluators=stale)
+
+    result = push_run(_make_run(), evaluator_mode="code", project_client=client)
+
+    assert isinstance(result, PushResult)
+    assert ("assert-policy_violation", "1") in client.beta.evaluators.deleted
+    assert "assert-policy_violation" in {name for name, _ in client.beta.evaluators.created}
+    assert "assert-policy_violation" not in result.reused_evaluators
+
+
+def test_push_replaces_evaluator_when_prompt_text_drifts() -> None:
+    """Same type, different rubric prose in ``prompt_text`` ⇒ delete + re-register.
+
+    Simulates a customer editing their ASSERT config's rubric between
+    pushes: the resulting prompt-variant evaluator's ``prompt_text``
+    changes, its fingerprint differs, and the pipeline must refresh
+    the registered evaluator so new eval runs pick up the new rubric.
+    """
+    stale_spec = build_prompt_evaluator_spec(
+        "policy_violation", description="whatever", rubric_prose="OLD RUBRIC PROSE"
+    )
+    stale_version = stale_spec.evaluator_version
+    # Force divergence from what the pipeline will build for this run.
+    stale_version.definition.prompt_text = "MUTATED PROMPT TEMPLATE"
+    stale = {("assert-policy_violation-rescore", "1"): stale_version}
+    client = _fake_client(existing_evaluators=stale)
+
+    result = push_run(_make_run(), evaluator_mode="prompt", project_client=client)
+
+    assert isinstance(result, PushResult)
+    assert ("assert-policy_violation-rescore", "1") in client.beta.evaluators.deleted
+    assert "assert-policy_violation-rescore" in {name for name, _ in client.beta.evaluators.created}
+    assert "assert-policy_violation-rescore" not in result.reused_evaluators
+
+
+def test_push_ignores_description_only_drift() -> None:
+    """Same grader body, different description prose ⇒ no delete+re-register.
+
+    The description is UI-only and doesn't affect scoring behavior.
+    A customer editing prose in their config should not force a
+    delete+recreate cycle on every push.
+    """
+    fresh_spec = build_code_evaluator_spec("policy_violation", description="whatever")
+    stored = fresh_spec.evaluator_version
+    # Change only the description (fingerprint should stay stable).
+    stored.description = "Different prose that customers might edit repeatedly"
+    stale = {("assert-policy_violation", "1"): stored}
+    client = _fake_client(existing_evaluators=stale)
+
+    result = push_run(_make_run(), evaluator_mode="code", project_client=client)
+
+    assert isinstance(result, PushResult)
+    assert ("assert-policy_violation", "1") not in client.beta.evaluators.deleted
+    # No re-registration because the fingerprint matched.
+    assert not any(name == "assert-policy_violation" for name, _ in client.beta.evaluators.created)
+    assert "assert-policy_violation" in result.reused_evaluators
 
 
 def test_push_uploads_dataset_when_content_hash_new() -> None:

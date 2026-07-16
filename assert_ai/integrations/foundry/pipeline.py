@@ -48,6 +48,8 @@ POSTed.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import tempfile
 from dataclasses import dataclass
@@ -399,37 +401,46 @@ def _ensure_evaluators(
     evaluators_op: Any,
     specs: Sequence[AssertEvaluatorSpec],
 ) -> tuple[list[EvaluatorRef], list[str]]:
-    """Register each spec unless the named+version already exists as the same variant.
+    """Register each spec unless the named+version already exists as an exact match.
 
-    Foundry's evaluator name+version is the identity; if the same
+    Foundry's evaluator name+version is the identity: name and
+    version together identify one immutable definition. If the same
     ``assert-{dim}[/-rescore]`` at version ``"1"`` already exists in
-    the catalog **as the same variant** (code vs prompt vs the
-    older ``rubric`` shape ASSERT v1 shipped), reuse it.
+    the catalog **and its definition fingerprints byte-identical to
+    what we would send**, reuse it.
 
-    If the existing version has a different definition type (e.g. a
-    stale ``rubric`` evaluator left behind by ASSERT v1), delete it
-    and re-register with the current spec. Foundry treats a mismatched
-    schema as unusable in downstream eval-create — silent reuse would
-    fail later with an opaque validation error.
+    We compare a stable fingerprint over the semantic fields of
+    ``definition`` (see :func:`_definition_fingerprint`) rather than
+    just the type. Any drift — old ASSERT v1 ``rubric`` shape, a
+    change in ``code_text``, an edited prompt rubric, a widened
+    ``data_schema``, or new ``init_parameters`` — flips the
+    fingerprint and forces a ``delete_version`` +
+    ``create_version``.
 
-    Callers who want a fresh registration can also delete the version
-    in the Foundry UI before pushing.
+    Description text and display names are UI-only and are
+    excluded from the fingerprint on purpose: a customer editing
+    prose in their config shouldn't trigger a delete+recreate as
+    long as the scoring behavior is unchanged.
+
+    Callers who want a fresh registration can also delete the
+    version in the Foundry UI before pushing.
     """
     refs: list[EvaluatorRef] = []
     reused: list[str] = []
     for spec in specs:
         name = spec.evaluator_name
         version = "1"
-        expected_type = _expected_definition_type(spec)
+        expected_fingerprint = _definition_fingerprint(spec.evaluator_version)
         existing = _get_evaluator_version(evaluators_op, name=name, version=version)
         if existing is None:
             evaluators_op.create_version(name, spec.evaluator_version)
-        elif _definition_type_of(existing) == expected_type:
+        elif _definition_fingerprint(existing) == expected_fingerprint:
             reused.append(name)
         else:
-            # Stale evaluator with a different definition type — delete
-            # and re-register so downstream eval-create doesn't fail
-            # against a mismatched schema.
+            # Definition has drifted — delete and re-register so
+            # downstream eval-create doesn't run against a stale
+            # schema, and so new eval runs pick up the current
+            # grader logic / rubric.
             evaluators_op.delete_version(name, version)
             evaluators_op.create_version(name, spec.evaluator_version)
         refs.append(
@@ -453,15 +464,54 @@ def _get_evaluator_version(
         return None
 
 
-def _expected_definition_type(spec: AssertEvaluatorSpec) -> str:
-    """Return the ``definition.type`` Foundry stores for this spec's variant."""
-    return "code" if spec.variant == "code" else "prompt"
+def _definition_fingerprint(evaluator_version: Any) -> str:
+    """Stable 12-char fingerprint of the semantic definition fields.
 
+    Covers every field that changes what score a row receives:
+    ``type``, ``code_text`` / ``prompt_text``, ``data_schema``,
+    ``init_parameters``, and ``metrics``. Explicitly **excludes**
+    UI-only fields like ``description`` and ``display_name`` — a
+    customer editing rubric prose in their ASSERT config shouldn't
+    force a delete+recreate as long as the underlying grader
+    behavior is unchanged. (Rubric changes that affect the
+    prompt-variant's ``prompt_text`` still flip the fingerprint
+    because they mutate the actual grader body.)
 
-def _definition_type_of(evaluator_version: Any) -> str:
-    """Extract ``definition.type`` from an SDK evaluator version object."""
+    Works on both SDK model instances (returned by ``get_version``)
+    and plain dicts (returned by test fakes) via :func:`_dict_get`.
+    """
     definition = _dict_get(evaluator_version, "definition", {}) or {}
-    return str(_dict_get(definition, "type", "") or "").lower()
+    canonical = {
+        "type": str(_dict_get(definition, "type", "") or "").lower(),
+        "code_text": _to_plain(_dict_get(definition, "code_text", None)),
+        "prompt_text": _to_plain(_dict_get(definition, "prompt_text", None)),
+        "data_schema": _to_plain(_dict_get(definition, "data_schema", {})),
+        "init_parameters": _to_plain(_dict_get(definition, "init_parameters", {})),
+        "metrics": _to_plain(_dict_get(definition, "metrics", {})),
+    }
+    payload = json.dumps(canonical, sort_keys=True, ensure_ascii=False, default=str)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12]
+
+
+def _to_plain(value: Any) -> Any:
+    """Recursively convert an SDK model or nested container to JSON-serializable form.
+
+    SDK models expose ``as_dict()`` when available; otherwise we
+    walk mappings and sequences by hand. Scalars pass through
+    unchanged.
+    """
+    if value is None:
+        return None
+    if hasattr(value, "as_dict") and callable(value.as_dict):
+        try:
+            return _to_plain(value.as_dict())
+        except Exception:
+            pass
+    if isinstance(value, Mapping):
+        return {str(k): _to_plain(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_to_plain(v) for v in value]
+    return value
 
 
 # ── Step 5: dataset registration ────────────────────────────────────
