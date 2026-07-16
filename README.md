@@ -51,12 +51,6 @@ Install the published package in your project:
 python -m pip install "assert-ai[otel,langgraph]"
 ```
 
-To install an unreleased revision, replace `main` with a commit SHA or tag:
-
-```bash
-python -m pip install "assert-ai[otel,langgraph] @ git+https://github.com/responsibleai/ASSERT.git@main"
-```
-
 ### Run the repository quickstart
 
 For contributors and anyone running the examples from a source checkout:
