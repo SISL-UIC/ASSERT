@@ -109,6 +109,7 @@ def _stub_dry_run(*_: Any, **__: Any) -> DryRunResult:
         evaluator_fingerprints={},
         judge_deployment="gpt-5.4-mini",
         passing_when_true={},
+        prompt_variant_calls=0,
     )
 
 

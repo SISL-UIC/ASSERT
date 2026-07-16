@@ -432,6 +432,27 @@ def test_dry_run_exposes_evaluator_fingerprints() -> None:
         assert isinstance(fp, str) and len(fp) == 12, name
 
 
+def test_dry_run_exposes_prompt_variant_call_estimate() -> None:
+    """LLM cost estimate = (# prompt evaluators) × (# dataset rows).
+
+    Surfaces the Foundry-side inference cost of a prompt-variant push
+    without any network calls. Code-only mode reports 0.
+    """
+    result = push_run(_make_run(), dry_run=True)  # default mode is 'both'
+    assert isinstance(result, DryRunResult)
+    # 2 dims × 1 row × 1 prompt evaluator per dim = 2 calls.
+    assert result.prompt_variant_calls == 2
+
+    code_only = push_run(_make_run(), evaluator_mode="code", dry_run=True)
+    assert isinstance(code_only, DryRunResult)
+    assert code_only.prompt_variant_calls == 0
+
+    prompt_only = push_run(_make_run(), evaluator_mode="prompt", dry_run=True)
+    assert isinstance(prompt_only, DryRunResult)
+    # 2 dims × 1 row = 2 calls.
+    assert prompt_only.prompt_variant_calls == 2
+
+
 def test_dry_run_fingerprint_flips_when_rubric_prose_changes() -> None:
     """Editing rubric prose in config.yaml must flip the prompt-variant fingerprint.
 

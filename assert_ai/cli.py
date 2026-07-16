@@ -1588,6 +1588,7 @@ def foundry_push(
 
     if isinstance(result, dry_result_cls):
         fingerprints = dict(getattr(result, "evaluator_fingerprints", {}) or {})
+        prompt_calls = int(getattr(result, "prompt_variant_calls", 0) or 0)
         if as_json:
             _echo_json({
                 "dry_run": True,
@@ -1598,6 +1599,7 @@ def foundry_push(
                 "dataset_row_count": result.dataset_row_count,
                 "judge_deployment": result.judge_deployment,
                 "passing_when_true": dict(result.passing_when_true),
+                "prompt_variant_calls": prompt_calls,
                 "evaluators": [
                     {
                         "name": spec.evaluator_name,
@@ -1625,6 +1627,13 @@ def foundry_push(
             f"{k}={str(v).lower()}" for k, v in sorted(dict(result.passing_when_true).items())
         ) or "(none)"
         summary.add_row("Passing-when-true", overrides_str)
+        if prompt_calls:
+            summary.add_row(
+                "LLM calls (prompt variant)",
+                f"~{prompt_calls} (1 per row × prompt evaluator)",
+            )
+        else:
+            summary.add_row("LLM calls (prompt variant)", "0 (code-only mode)")
         console.print(summary)
 
         if result.evaluator_specs:

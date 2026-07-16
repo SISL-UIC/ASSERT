@@ -144,6 +144,13 @@ class DryRunResult:
 
     judge_deployment: str
     passing_when_true: Mapping[str, bool]
+    prompt_variant_calls: int
+    """Estimated LLM calls Foundry will make when scoring this push.
+
+    One call per (row × prompt-variant evaluator). Code-variant
+    evaluators are free (sandbox function call, no model). Zero
+    when ``--evaluator-mode code``.
+    """
 
 
 # ── Naming helpers ──────────────────────────────────────────────────
@@ -303,6 +310,7 @@ def push_run(
             spec.evaluator_name: _definition_fingerprint(spec.evaluator_version)
             for spec in evaluator_specs
         }
+        prompt_evaluator_count = sum(1 for spec in evaluator_specs if spec.variant == "prompt")
         return DryRunResult(
             eval_name=resolved_eval_name,
             run_name=resolved_run_name,
@@ -313,6 +321,7 @@ def push_run(
             evaluator_fingerprints=fingerprints,
             judge_deployment=judge_deployment,
             passing_when_true=directions,
+            prompt_variant_calls=prompt_evaluator_count * len(rows),
         )
 
     # Real push. Build the SDK clients if not injected.
