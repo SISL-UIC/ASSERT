@@ -1464,12 +1464,13 @@ def _parse_passing_when_true(pair: str) -> tuple[str, bool]:
 @click.argument("run_dir", type=click.Path(exists=True, file_okay=False, path_type=Path))
 @click.option(
     "--project",
-    required=True,
+    default=None,
     help=(
         "Foundry project. Accepts: endpoint URL "
         "(https://<account>.services.ai.azure.com/api/projects/<project>), "
         "the '<account>/<project>' shorthand, or a Cognitive Services project "
-        "ARM id."
+        "ARM id. Required for real pushes; optional for --dry-run (the exporter "
+        "makes no network calls in dry-run mode)."
     ),
 )
 @click.option(
@@ -1539,7 +1540,7 @@ def _parse_passing_when_true(pair: str) -> tuple[str, bool]:
 @click.option("--no-color", is_flag=True, help="Disable colored terminal output.")
 def foundry_push(
     run_dir: Path,
-    project: str,
+    project: str | None,
     evaluator_mode: str,
     eval_name: str | None,
     run_name: str | None,
@@ -1559,6 +1560,15 @@ def foundry_push(
 
     Requires the 'foundry' extra: pip install -e ".[foundry]"
     """
+    # --project is only needed when we'll actually hit Foundry. Enforcing
+    # it at the click layer would block --dry-run in a fresh checkout
+    # (no `az login`, no exported endpoint), which contradicts the
+    # runbook's pitch of dry-run as the fastest way to catch config
+    # mistakes before touching a real project.
+    if not dry_run and not project:
+        _error("Missing option '--project' (required for real pushes; optional for --dry-run).")
+        return
+
     push_run_dir = _load_foundry_symbol("push_run_dir")
     push_error_cls = _load_foundry_symbol("PushError")
     dry_result_cls = _load_foundry_symbol("DryRunResult")

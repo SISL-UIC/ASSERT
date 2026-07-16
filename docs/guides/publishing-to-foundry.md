@@ -98,11 +98,16 @@ deployment, eval name — but makes zero network calls. It's the
 fastest way to catch config mistakes before you touch a real
 Foundry project.
 
+`--project` is optional in dry-run mode, so this works in a fresh
+checkout before you've picked a project or run `az login`:
+
 ```bash
-assert-ai foundry push artifacts/results/<suite>/<run> \
-    --project "$FOUNDRY_PROJECT" \
-    --dry-run
+assert-ai foundry push artifacts/results/<suite>/<run> --dry-run
 ```
+
+For a real push, `--project` is required and takes any of the
+forms in the [Identify your project](#identify-your-project)
+section above.
 
 Expected output shape:
 
@@ -223,7 +228,7 @@ history is preserved.
 
 ```
 assert-ai foundry push RUN_DIR
-    --project <arm-id | account/project | endpoint-url>   [required]
+    --project <arm-id | account/project | endpoint-url>   [required for real push]
     --evaluator-mode {code, prompt, both}                 [default: both]
     --eval-name <name>                                     [default: ASSERT: <suite_id>]
     --run-name <name>                                      [default: ASSERT run: <run_id>]

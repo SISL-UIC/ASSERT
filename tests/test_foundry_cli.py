@@ -364,15 +364,47 @@ def test_push_evaluator_mode_choice_is_validated() -> None:
     assert "bogus" in result.output.lower() or "invalid" in result.output.lower()
 
 
-def test_push_requires_project(tmp_path: Any) -> None:
+def test_push_requires_project_for_real_push(tmp_path: Any) -> None:
+    """A real (non-dry-run) push without --project is rejected with a clear message."""
     run_dir = tmp_path / "run"
     run_dir.mkdir()
 
     runner = CliRunner()
-    result = runner.invoke(cli, ["foundry", "push", str(run_dir), "--dry-run"])
+    result = runner.invoke(cli, ["foundry", "push", str(run_dir)])
 
     assert result.exit_code != 0
     assert "--project" in result.output
+
+
+def test_push_dry_run_works_without_project(monkeypatch: Any, tmp_path: Any) -> None:
+    """--dry-run makes no network calls, so --project is optional in dry-run mode.
+
+    Regression guard: the runbook advertises dry-run as the fastest
+    way to catch config mistakes before touching Foundry, so it must
+    work in a fresh checkout with no exported project id.
+    """
+    captured: dict[str, Any] = {}
+
+    def _capture(*args: Any, **kwargs: Any) -> DryRunResult:
+        captured.update(kwargs)
+        return _stub_dry_run()
+
+    _install_stub(monkeypatch, _capture)
+
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        ["foundry", "push", str(run_dir), "--dry-run"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Dry-run" in result.output
+    # The pipeline receives project=None; dry-run path ignores it.
+    assert captured.get("project") is None
+    assert captured.get("dry_run") is True
 
 
 def test_push_passing_when_true_repeatable(monkeypatch: Any, tmp_path: Any) -> None:
