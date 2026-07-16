@@ -1069,7 +1069,7 @@
 				<p>{auditRefusedCount} {auditRefusedCount === 1 ? 'scenario was' : 'scenarios were'} refused before producing a transcript.</p>
 			{/if}
 			{#if activeTab === 'audit' && auditErroredCount > 0}
-				<p>{auditErroredCount} {auditErroredCount === 1 ? 'scenario' : 'scenarios'} hit an Inference error and {auditErroredCount === 1 ? 'was' : 'were'} excluded from the rates.</p>
+				<p>{auditErroredCount} {auditErroredCount === 1 ? 'scenario' : 'scenarios'} encountered an error during Inference and {auditErroredCount === 1 ? 'was' : 'were'} excluded from the rates.</p>
 			{/if}
 		</div>
 	{/if}
