@@ -92,7 +92,11 @@ azure-aad = [
 # datasets, evaluators, and evals data-plane calls; DefaultAzureCredential
 # for auth (`az login`, workload identity, or managed identity all work).
 foundry = [
-  "azure-ai-projects>=2.2.0",
+  # Cap the major so `.beta.*` API drift (evaluators.get_version /
+  # create_version / delete_version live under `.beta.evaluators` in
+  # the current SDK) doesn't silently break re-pushes on a `pip install
+  # -U`. Re-verify + widen the cap when a compatible newer major ships.
+  "azure-ai-projects>=2.2.0,<3.0.0",
   "azure-identity>=1.19.0",
 ]
 acs = [

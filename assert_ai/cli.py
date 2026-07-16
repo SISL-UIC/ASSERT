@@ -1436,8 +1436,7 @@ def foundry():
     dimension scores in its Evaluations tab.
 
     Requires the ``foundry`` extra: ``pip install -e ".[foundry]"``.
-    Currently populated by follow-up commits; ``--help`` works without
-    the extra installed.
+    ``--help`` works without the extra installed.
     """
 
 

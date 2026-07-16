@@ -42,11 +42,6 @@ translation helpers (``artifacts``, ``dataset``, ``evaluators``) depend
 only on ``assert_ai`` and the standard library; the ``pipeline`` module
 requires ``azure-ai-projects`` and raises a clear install hint
 (``pip install "assert-ai[foundry]"``) when the extra is absent.
-
-The subpackage is populated incrementally: the loader, evaluator spec
-builder, row builder, pipeline, and CLI wiring each land as separate
-commits behind this stable public surface. Currently empty — this
-commit installs the extras + scaffold only.
 """
 
 from __future__ import annotations
