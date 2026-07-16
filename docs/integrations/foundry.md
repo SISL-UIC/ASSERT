@@ -182,15 +182,21 @@ runbook).
         "assert_scores": {
           "type": "object",
           "properties": {"{dim_id}": {"type": "number"}},
-          "required": ["{dim_id}"]
+          "required": []
         }
       },
-      "required": ["assert_scores"]
+      "required": []
     },
     "init_parameters": {"type": "object", "properties": {}, "required": []}
   }
 }
 ```
+
+Neither the outer object nor the specific dimension is marked
+`required` so rows for un-judged inference entries (empty
+`assert_scores` map) still validate against this schema. The grader
+itself defaults missing values to `0.0`, which surfaces as a fail —
+the intended behavior for a row whose judge errored.
 
 The `code_text` runs in Foundry's sandbox per row:
 
@@ -328,7 +334,7 @@ hashes across pushes of identical logical content.
         "assert_scores": {
           "type": "object",
           "properties": {"{dim_id}": {"type": "number"}},
-          "required": ["{dim_id}", ...]
+          "required": []
         },
         "assert_reasons": {
           "type": "object",
@@ -336,7 +342,7 @@ hashes across pushes of identical logical content.
           "required": []
         }
       },
-      "required": ["query", "response", "assert_scores"]
+      "required": ["query", "response"]
     },
     "include_sample_schema": false
   },
