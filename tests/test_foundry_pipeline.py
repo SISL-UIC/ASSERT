@@ -729,6 +729,38 @@ def test_push_ignores_description_only_drift() -> None:
     assert "assert-policy_violation" in result.reused_evaluators
 
 
+def test_push_propagates_non_typeerror_from_list_versions() -> None:
+    """SDK errors from ``list_versions`` must bubble up, not be swallowed.
+
+    Regression guard for the fallback catch in
+    :func:`_list_evaluator_versions`. A transient SDK exception
+    (auth expiry, throttling, network) must NOT fall through to the
+    enumerate path — that would silently treat the name as fresh
+    and register a duplicate on top of the existing catalog. Only
+    kwarg-mismatch ``TypeError`` (from older-signature fakes) is
+    tolerated.
+    """
+
+    class _Boom(RuntimeError):
+        pass
+
+    class _RaisingEvaluators:
+        def list_versions(self, name: str, **_: Any) -> list[Any]:
+            raise _Boom("simulated SDK failure")
+
+        def get_version(self, name: str, version: str) -> Any:  # pragma: no cover
+            raise AssertionError("must not fall through to enumerate path")
+
+        def create_version(self, name: str, evaluator_version: Any) -> Any:  # pragma: no cover
+            raise AssertionError("must not register on top of an unknown catalog")
+
+    client = _fake_client()
+    client.beta.evaluators = _RaisingEvaluators()
+
+    with pytest.raises(_Boom):
+        push_run(_make_run(), evaluator_mode="code", project_client=client)
+
+
 # ── Fingerprint round-trip normalization ────────────────────────────
 
 

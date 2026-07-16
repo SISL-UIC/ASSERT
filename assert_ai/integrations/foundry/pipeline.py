@@ -494,9 +494,13 @@ def _list_evaluator_versions(evaluators_op: Any, *, name: str) -> list[Any]:
             return list(_iter_paged(lister, name=name))
         except _resource_not_found_types():
             return []
-        except Exception:
-            # Some fakes raise TypeError on unexpected kwargs; fall
-            # through to the enumerate path below.
+        except TypeError:
+            # Some fakes have a list_versions attribute with a signature
+            # that rejects the ``name`` kwarg. Fall through to the
+            # enumerate path below. Any other exception (SDK error,
+            # network, auth, throttling) propagates so we don't
+            # silently treat it as "no existing versions" and register
+            # a duplicate on top of the real catalog.
             pass
 
     # Fallback: enumerate 1..N until we hit a not-found. Used by
