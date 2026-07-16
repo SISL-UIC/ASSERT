@@ -145,24 +145,30 @@ def test_code_spec_metric_is_continuous_zero_to_one() -> None:
     assert metric["max_value"] == 1.0
 
 
-def test_code_spec_data_schema_requires_pre_computed_score() -> None:
-    """Schema fails Foundry validation before scoring if the score is missing.
+def test_code_spec_data_schema_declares_assert_scores_as_optional() -> None:
+    """Schema declares assert_scores + the dimension without requiring either.
 
-    Data schema declares ``assert_scores`` at the top level (not wrapped in
-    an ``item`` object). This matches the eval-side ``data_mapping``:
+    Data schema declares ``assert_scores`` at the top level (not wrapped
+    in an ``item`` object). This matches the eval-side ``data_mapping``:
     ``{"assert_scores": "{{item.assert_scores}}"}`` — Foundry's regex
     validator rejects mapping values that aren't in the ``{{item.foo}}``
     form and rejects mapping keys that don't match a declared schema
     property.
+
+    Both ``assert_scores`` and its inner dimension are declared but
+    NOT required. Rows for inference entries whose judge errored will
+    carry an empty ``assert_scores`` map (see :func:`build_dataset_rows`
+    in ``dataset.py``); we want those rows visible in Foundry as
+    un-scored conversations rather than rejected at schema validation.
     """
     spec = build_code_evaluator_spec("policy_violation", description="x")
     schema = spec.evaluator_version.as_dict()["definition"]["data_schema"]
 
     assert schema["type"] == "object"
     assert "assert_scores" in schema["properties"]
-    assert schema["required"] == ["assert_scores"]
+    assert schema["required"] == []
     assert "policy_violation" in schema["properties"]["assert_scores"]["properties"]
-    assert schema["properties"]["assert_scores"]["required"] == ["policy_violation"]
+    assert schema["properties"]["assert_scores"]["required"] == []
 
 
 def test_code_spec_init_parameters_are_empty() -> None:

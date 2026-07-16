@@ -362,9 +362,15 @@ def _render_code_grader(dimension_id: str) -> str:
 def _code_data_schema(dimension_id: str) -> dict:
     """JSON schema declaring the row fields the code grader reads.
 
-    ``assert_scores`` is exposed as a top-level required field. Foundry
-    binds the corresponding row column via the eval's
+    ``assert_scores`` is exposed as an optional top-level field.
+    Foundry binds the corresponding row column via the eval's
     ``data_mapping``: ``{"assert_scores": "{{item.assert_scores}}"}``.
+    Neither the outer object nor the specific dimension is marked
+    ``required`` so rows for un-judged inference entries (empty
+    ``assert_scores`` map) still validate against this schema and
+    render as un-scored conversations in the Foundry UI. The
+    grader itself defaults missing values to 0.0, which surfaces
+    as a fail — the intended behavior for a row whose judge errored.
     """
     return {
         "type": "object",
@@ -374,10 +380,10 @@ def _code_data_schema(dimension_id: str) -> dict:
                 "properties": {
                     dimension_id: {"type": "number"},
                 },
-                "required": [dimension_id],
+                "required": [],
             },
         },
-        "required": ["assert_scores"],
+        "required": [],
     }
 
 

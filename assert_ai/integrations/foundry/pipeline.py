@@ -785,10 +785,16 @@ def _build_data_source_config(
 ) -> dict[str, Any]:
     """Foundry ``custom`` data source config declaring the row schema.
 
-    Every row carries ``query`` + ``response`` + ``assert_scores`` +
-    ``assert_reasons``. ``include_sample_schema`` is False because
-    the eval reads from a registered dataset asset (file_id), not
-    inline sample content.
+    Every row carries ``query`` + ``response`` + optional
+    ``assert_scores`` + optional ``assert_reasons``.
+    ``include_sample_schema`` is False because the eval reads from a
+    registered dataset asset (file_id), not inline sample content.
+
+    ``assert_scores`` is declared but not required at the row level:
+    rows for inference entries whose judge errored will carry an
+    empty ``assert_scores`` map (see :func:`build_dataset_rows`).
+    We want those rows visible in Foundry as un-scored conversations
+    rather than rejected at data-source validation.
     """
     dims = sorted({s.dimension_id for s in evaluator_specs})
     return {
@@ -801,7 +807,7 @@ def _build_data_source_config(
                 "assert_scores": {
                     "type": "object",
                     "properties": {d: {"type": "number"} for d in dims},
-                    "required": dims,
+                    "required": [],
                 },
                 "assert_reasons": {
                     "type": "object",
@@ -809,7 +815,7 @@ def _build_data_source_config(
                     "required": [],
                 },
             },
-            "required": ["query", "response", "assert_scores"],
+            "required": ["query", "response"],
         },
         "include_sample_schema": False,
     }

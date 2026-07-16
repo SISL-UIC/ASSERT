@@ -886,6 +886,26 @@ def test_push_testing_criteria_code_variants_have_empty_init_parameters() -> Non
         assert c["initialization_parameters"] == {}
 
 
+def test_push_data_source_config_tolerates_missing_scores() -> None:
+    """The eval's item_schema must accept rows with an empty ``assert_scores`` map.
+
+    :func:`build_dataset_rows` emits one row per inference entry — even
+    entries whose judge errored (empty ``assert_scores``). If the
+    data_source_config declared any dimension as ``required``, Foundry
+    would reject those rows at dataset validation. The un-scored
+    conversation should still show up in the Foundry UI.
+    """
+    client = _fake_client()
+
+    push_run(_make_run(), project_client=client)
+
+    dsc = client._openai.evals.created_evals[0]["data_source_config"]
+    item = dsc["item_schema"]
+    assert item["required"] == ["query", "response"]
+    assert item["properties"]["assert_scores"]["required"] == []
+    assert item["properties"]["assert_reasons"]["required"] == []
+
+
 # ── Error paths ─────────────────────────────────────────────────────
 
 
