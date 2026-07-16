@@ -16,6 +16,11 @@ from typing import Any
 import pytest
 from click.testing import CliRunner
 
+# The `[foundry]` extra (azure-ai-projects) backs every symbol reached
+# from this module. Skip cleanly on a base install so CI's Tier 1 job
+# (which does not install optional extras) can still collect the file.
+pytest.importorskip("azure.ai.projects")
+
 from assert_ai.cli import _parse_passing_when_true, cli
 from assert_ai.integrations.foundry.evaluators import AssertEvaluatorSpec
 from assert_ai.integrations.foundry.pipeline import (
