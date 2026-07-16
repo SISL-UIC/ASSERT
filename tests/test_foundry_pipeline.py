@@ -397,6 +397,76 @@ def test_dry_run_carries_passing_when_true_overrides() -> None:
     assert result.passing_when_true == {"answer_quality": True}
 
 
+def test_dry_run_exposes_evaluator_fingerprints() -> None:
+    """Dry-run surfaces the same fingerprint the drift check would compare against.
+
+    Lets a caller detect config-level changes that would trigger a
+    Foundry-side delete+recreate (rubric prose edited in
+    config.yaml, etc.) without hitting the network.
+    """
+    result = push_run(_make_run(), dry_run=True)
+
+    assert isinstance(result, DryRunResult)
+    assert set(result.evaluator_fingerprints) == {
+        "assert-overrefusal",
+        "assert-overrefusal-rescore",
+        "assert-policy_violation",
+        "assert-policy_violation-rescore",
+    }
+    for name, fp in result.evaluator_fingerprints.items():
+        assert isinstance(fp, str) and len(fp) == 12, name
+
+
+def test_dry_run_fingerprint_flips_when_rubric_prose_changes() -> None:
+    """Editing rubric prose in config.yaml must flip the prompt-variant fingerprint.
+
+    Verifies the exact E2E signal customers rely on: change something
+    in the run config → the fingerprint for the affected prompt
+    evaluator differs → the next real push triggers delete+recreate.
+    """
+    base_config = {
+        "default_model": {"name": "azure/gpt-5.4"},
+        "pipeline": {
+            "judge": {
+                "dimensions": {
+                    "policy_violation": {
+                        "description": "Original rubric prose",
+                        "rubric": "1=violation, 5=clean",
+                    }
+                }
+            }
+        },
+    }
+    edited_config = {
+        "default_model": {"name": "azure/gpt-5.4"},
+        "pipeline": {
+            "judge": {
+                "dimensions": {
+                    "policy_violation": {
+                        "description": "REVISED rubric prose",
+                        "rubric": "1=violation, 5=clean",
+                    }
+                }
+            }
+        },
+    }
+
+    before = push_run(_make_run(config=base_config), dry_run=True)
+    after = push_run(_make_run(config=edited_config), dry_run=True)
+
+    assert isinstance(before, DryRunResult) and isinstance(after, DryRunResult)
+    # Prompt variant reads rubric prose ⇒ fingerprint flips.
+    assert (
+        before.evaluator_fingerprints["assert-policy_violation-rescore"]
+        != after.evaluator_fingerprints["assert-policy_violation-rescore"]
+    )
+    # Code variant is hard-coded ⇒ fingerprint stays stable across rubric edits.
+    assert (
+        before.evaluator_fingerprints["assert-policy_violation"]
+        == after.evaluator_fingerprints["assert-policy_violation"]
+    )
+
+
 # ── push_run — orchestration ────────────────────────────────────────
 
 

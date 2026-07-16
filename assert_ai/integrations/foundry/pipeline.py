@@ -135,6 +135,13 @@ class DryRunResult:
     dataset_version: str
     dataset_row_count: int
     evaluator_specs: tuple[AssertEvaluatorSpec, ...]
+    evaluator_fingerprints: Mapping[str, str]
+    """``{evaluator_name → fingerprint}`` for each spec. Same 12-char
+    SHA-256 the drift check would compare against Foundry's stored
+    evaluator. Lets a caller compare fingerprints across pushes
+    (edit a rubric, dry-run again, see which fingerprint flipped)
+    without hitting Foundry."""
+
     judge_deployment: str
     passing_when_true: Mapping[str, bool]
 
@@ -292,6 +299,10 @@ def push_run(
     resolved_dataset_name = dataset_name or default_dataset_name(run)
 
     if dry_run:
+        fingerprints = {
+            spec.evaluator_name: _definition_fingerprint(spec.evaluator_version)
+            for spec in evaluator_specs
+        }
         return DryRunResult(
             eval_name=resolved_eval_name,
             run_name=resolved_run_name,
@@ -299,6 +310,7 @@ def push_run(
             dataset_version=dataset_version,
             dataset_row_count=len(rows),
             evaluator_specs=tuple(evaluator_specs),
+            evaluator_fingerprints=fingerprints,
             judge_deployment=judge_deployment,
             passing_when_true=directions,
         )

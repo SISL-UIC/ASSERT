@@ -1588,6 +1588,7 @@ def foundry_push(
         return
 
     if isinstance(result, dry_result_cls):
+        fingerprints = dict(getattr(result, "evaluator_fingerprints", {}) or {})
         if as_json:
             _echo_json({
                 "dry_run": True,
@@ -1599,7 +1600,11 @@ def foundry_push(
                 "judge_deployment": result.judge_deployment,
                 "passing_when_true": dict(result.passing_when_true),
                 "evaluators": [
-                    {"name": spec.evaluator_name, "variant": spec.variant}
+                    {
+                        "name": spec.evaluator_name,
+                        "variant": spec.variant,
+                        "fingerprint": fingerprints.get(spec.evaluator_name, ""),
+                    }
                     for spec in result.evaluator_specs
                 ],
             })
@@ -1633,8 +1638,13 @@ def foundry_push(
             )
             table.add_column("Name", style="cyan", no_wrap=True)
             table.add_column("Variant", style="white", no_wrap=True)
+            table.add_column("Fingerprint", style="white", no_wrap=True)
             for spec in result.evaluator_specs:
-                table.add_row(spec.evaluator_name, spec.variant)
+                table.add_row(
+                    spec.evaluator_name,
+                    spec.variant,
+                    fingerprints.get(spec.evaluator_name, ""),
+                )
             console.print(table)
         return
 

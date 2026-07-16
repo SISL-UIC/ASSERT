@@ -106,6 +106,7 @@ def _stub_dry_run(*_: Any, **__: Any) -> DryRunResult:
         dataset_version="deadbeef1234",
         dataset_row_count=42,
         evaluator_specs=(),  # not printed in detail; count is 0
+        evaluator_fingerprints={},
         judge_deployment="gpt-5.4-mini",
         passing_when_true={},
     )
