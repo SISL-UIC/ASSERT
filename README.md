@@ -43,10 +43,28 @@ From the natural language specification, the ASSERT pipeline derives behavior ca
 
 ## Get started
 
-### Quick install
+### Install
+
+Install the published package in your project:
 
 ```bash
-pip install -e ".[otel,langgraph]"       # install
+python -m pip install "assert-ai[otel,langgraph]"
+```
+
+To install an unreleased revision, replace `main` with a commit SHA or tag:
+
+```bash
+python -m pip install "assert-ai[otel,langgraph] @ git+https://github.com/responsibleai/ASSERT.git@main"
+```
+
+### Run the repository quickstart
+
+For contributors and anyone running the examples from a source checkout:
+
+```bash
+git clone https://github.com/responsibleai/ASSERT.git
+cd ASSERT
+python -m pip install -e ".[otel,langgraph]"
 cp .env.example .env                     # add your provider key
 assert-ai run --config examples/travel_planner_langgraph/eval_config.yaml
 ```
