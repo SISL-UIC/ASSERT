@@ -1622,7 +1622,7 @@ def foundry_push(
             return
 
         console = _console(no_color=no_color)
-        console.print("Dry-run — no network calls made.\n")
+        console.print("Dry-run -- no network calls made.\n")
 
         summary = Table(box=None, show_header=False, show_edge=False, pad_edge=False)
         summary.add_column("Field", style="cyan", no_wrap=True)
@@ -1640,7 +1640,7 @@ def foundry_push(
         if prompt_calls:
             summary.add_row(
                 "LLM calls (prompt variant)",
-                f"~{prompt_calls} (1 per row × prompt evaluator)",
+                f"~{prompt_calls} (1 per row x prompt evaluator)",
             )
         else:
             summary.add_row("LLM calls (prompt variant)", "0 (code-only mode)")
