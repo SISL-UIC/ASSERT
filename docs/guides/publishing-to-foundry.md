@@ -112,24 +112,29 @@ section above.
 Expected output shape:
 
 ```
-Dry-run — no network calls made.
+Dry-run -- no network calls made.
 
-Eval name       ASSERT: <suite>
-Run name        ASSERT run: <run>
-Dataset name    assert-<suite>
-Dataset version <12-hex-content-hash>
-Dataset rows    3
-Judge model     gpt-5.4-mini
-Passing-when-true overrides: (none)
-
-Evaluators (6):
-  - assert-policy_violation (code)
-  - assert-policy_violation-rescore (prompt)
-  - assert-overrefusal (code)
-  - assert-overrefusal-rescore (prompt)
-  - assert-answer_quality (code)
-  - assert-answer_quality-rescore (prompt)
+Eval name                   ASSERT: <suite>
+Run name                    ASSERT run: <run>
+Dataset name                assert-<suite>
+Dataset version             <12-hex-content-hash>
+Dataset rows                3
+Judge model                 gpt-5.4-mini
+Passing-when-true           (none)
+LLM calls (prompt variant)  ~9 (1 per row x prompt evaluator)
+                    Evaluators (6)
+Name                             Variant  Fingerprint
+assert-answer_quality            code     <12-hex>
+assert-answer_quality-rescore    prompt   <12-hex>
+assert-overrefusal               code     <12-hex>
+assert-overrefusal-rescore       prompt   <12-hex>
+assert-policy_violation          code     <12-hex>
+assert-policy_violation-rescore  prompt   <12-hex>
 ```
+
+The `LLM calls (prompt variant)` row shows the number of judge calls
+Foundry will make on the real push (`prompt evaluators x rows`).
+Under `--evaluator-mode code`, it renders `0 (code-only mode)`.
 
 If any dimension in `scores.jsonl` doesn't have a rubric resolved
 (no inline `pipeline.judge.dimensions.{name}` in `config.yaml` and
@@ -154,16 +159,17 @@ already human-readable.
 Expected output:
 
 ```
-Published eval  eval_<32-hex>
-Published run   evalrun_<32-hex>
-Dataset asset   azureai://accounts/<acct>/projects/<proj>/data/assert-<suite>/versions/<hash>
-Registered 6 evaluator(s):
-  - assert-policy_violation v1 (code)
-  - assert-policy_violation-rescore v1 (prompt)
-  - assert-overrefusal v1 (code)
-  - assert-overrefusal-rescore v1 (prompt)
-  - assert-answer_quality v1 (code)
-  - assert-answer_quality-rescore v1 (prompt)
+Eval     eval_<32-hex>
+Run      evalrun_<32-hex>
+Dataset  azureai://accounts/<acct>/projects/<proj>/data/assert-<suite>/versions/<hash>
+                         Evaluators (6)
+Name                             Version  Variant  Status
+assert-answer_quality            v1       code     new
+assert-answer_quality-rescore    v1       prompt   new
+assert-overrefusal               v1       code     new
+assert-overrefusal-rescore       v1       prompt   new
+assert-policy_violation          v1       code     new
+assert-policy_violation-rescore  v1       prompt   new
 ```
 
 Foundry starts scoring immediately after the run is created. For a
@@ -211,12 +217,17 @@ or uploads a new dataset version depending on whether row content
 changed:
 
 ```
-Published eval  eval_<same-hex-as-before> (reused)
-Published run   evalrun_<new-hex>
-Dataset asset   azureai://.../versions/<same-hash> (reused)
-Registered 6 evaluator(s), 6 reused:
-  - assert-policy_violation v1 (code) (reused)
-  - ...
+Eval     eval_<same-hex-as-before> (reused)
+Run      evalrun_<new-hex>
+Dataset  azureai://.../versions/<same-hash> (reused)
+                       Evaluators (6, 6 reused)
+Name                             Version  Variant  Status
+assert-answer_quality            v1       code     reused
+assert-answer_quality-rescore    v1       prompt   reused
+assert-overrefusal               v1       code     reused
+assert-overrefusal-rescore       v1       prompt   reused
+assert-policy_violation          v1       code     reused
+assert-policy_violation-rescore  v1       prompt   reused
 ```
 
 New rows or a new judge verdict shift the content hash, which
