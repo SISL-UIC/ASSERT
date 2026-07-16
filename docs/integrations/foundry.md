@@ -136,10 +136,23 @@ to run against the version they were created with.
 
 The `description` and `display_name` fields are **excluded from
 the fingerprint on purpose** because they're UI-only and don't
-affect scoring behavior. Editing rubric prose in the ASSERT
-config won't churn evaluator versions unless the edit also
-mutates the prompt-variant's `prompt_text` (which it typically
-will, since the rubric is inlined into the prompt template).
+affect scoring behavior. This creates a deliberate asymmetry
+between the two variants when a customer edits the rubric block
+in their ASSERT config (`pipeline.judge.dimensions.{dim}`):
+
+- The **prompt variant's** `prompt_text` inlines the rubric
+  prose, so a rubric edit changes `prompt_text` → fingerprint
+  flips → new evaluator version registered.
+- The **code variant's** `code_text` is hard-coded (it just
+  plucks the pre-computed ASSERT score off the row), so rubric
+  edits don't touch its `code_text` → fingerprint stable → same
+  evaluator version reused.
+
+Both variants receive the edited prose as their `description`,
+but that field is out of the fingerprint. To preview which
+evaluators will churn on the next push, dry-run with `--json`
+and diff the `fingerprint` field per evaluator (see the customer
+runbook).
 
 ## Custom evaluator specs
 
@@ -505,8 +518,17 @@ missing.
 ## Not covered by this doc
 
 - **Tool-call rendering** — `inference_set.jsonl` events include
-  tool interactions, but the current row builder emits only
-  message events. Extending to tool calls is a follow-up.
+  tool interactions, but the current row builder emits only user
+  and assistant message events (developer / system / tool events
+  are dropped). The code variant is unaffected because it plucks
+  ASSERT's pre-computed score off the row without re-reading the
+  conversation. The **prompt variant** re-judges from
+  `{{query}}` + `{{response}}` only, so on tool-heavy
+  conversations the LLM re-score sees a systematically less
+  informative transcript than the ASSERT judge did — expect
+  divergence between the code and prompt scores that is
+  *methodological*, not a genuine disagreement about the same
+  evidence. Full tool-event rendering is a follow-up.
 - **OpenTelemetry traces** — Foundry supports evaluating
   `invoke_agent` spans from Application Insights via the
   `azure_ai_trace_data_source_preview` data source. Emitting OTel
