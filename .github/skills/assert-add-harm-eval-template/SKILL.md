@@ -162,6 +162,19 @@ Then expand the ledger:
 3. Snowball through cited constructs, measures, and adjacent factors. Continue
   until two consecutive search/snowball passes produce no new relevant,
   non-redundant dimension. Merge aliases; reject candidates with a short reason.
+4. **Run a breadth audit before declaring saturation.** A result with only 2–4
+  retained dimensions is a warning sign for premature convergence, not a target
+  range. Revisit every plausibly applicable discovery prompt and every
+  harm-specific construct exposed by the sources, including severity/imminence,
+  presentation or signal type, support availability, help-seeking stance,
+  trajectory stage, and response pressure where relevant. For each omitted
+  candidate, record whether it was merged, lacked independent evidence, was not
+  executable, was not observable, or was genuinely irrelevant. An unspecified
+  target blocks tool-, RAG-, file-, and deployment-specific axes; it does not by
+  itself block dimensions expressible in ordinary prompt or scenario dialogue.
+5. Record the final two no-new-dimension passes in the ledger. Do not claim
+  exhaustive coverage or saturation when those passes and the breadth audit were
+  not completed.
 
 #### 3c. Apply a per-dimension evidence and relevance gate
 
