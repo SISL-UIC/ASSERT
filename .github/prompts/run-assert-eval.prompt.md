@@ -123,6 +123,10 @@ Select the suite and run for forest plots, per-dimension breakdowns, facet group
 
 See `docs/guides/use-local-viewer.md` for the full layout.
 
+### 8. Govern the failure and re-measure (ACS)
+
+When a run surfaces `policy_violation` failures and the user wants to **fix and prove it**, generate a deployable **ACS** (Agent Control Specification) policy from the findings and re-run the same eval against the governed agent to show the failure rate dropped — the ACS delta. Uses ASSERT's native `assert-ai acs generate` / `validate` adapter (no external `acs` CLI). Requires a **callable** target whose high-risk tools can be wrapped (`control.protect_tool`); a hosted-model Prompt Agent target has nothing wrappable. Follow `../../.claude/skills/run-assert-eval/workflows/govern-and-remeasure.md` (baseline → `acs generate` → `acs validate` → governed run → `results compare` → export to SharePoint → append `governance-ledger.md`). Reference: `examples/billing_support_agent/` (baseline + governed entrypoints).
+
 ## Output format
 
 Present a short summary with this structure:
@@ -138,13 +142,14 @@ For each failure:
 - Action cited: [specific turn or tool call from judge rationale]
 - Judge rationale: [verbatim from dimension_justifications]
 
-**Suggested next step**: one concrete action (e.g. "tighten the system prompt around X behavior", "add a dimension for Y", "apply an ACS guardrail at the failing checkpoint").
+**Suggested next step**: one concrete action (e.g. "tighten the system prompt around X behavior", "add a dimension for Y", or **govern the failure with ACS and re-measure to prove the rate dropped** — see Step 8 and `../../.claude/skills/run-assert-eval/workflows/govern-and-remeasure.md`).
 
 ## Guardrails
 
 - **Clarity is the required risk source** — for Run mode, risks come from Clarity (existing `.clarity-protocol/` or a fresh discovery run via the `run_clarity` MCP tool). Never substitute a plain-language guess or imitate Clarity's questioning from your own head; if the MCP tools can't be made available, stop and help fix it (`SETUP-CHECKLIST.md`).
 - **Drive the real Clarity MCP tools in-IDE** — use `run_clarity` / `write_protocol_document` / `record_failure` for discovery and `record_suggestion` to close the loop; never hand the user off to a separate Clarity app and never shell out to a `clarity cli` process.
 - **Close the loop** — after a run, offer `record_suggestion` (or `record_decision`) back into `.clarity-protocol/` noting the failure mode now has a measured baseline and where the eval lives.
+- **Govern with ACS, don't just prompt-tweak** — to fix and *prove* it, generate an ACS policy from the findings (`assert-ai acs generate`) and re-run the same eval against the governed callable to show the delta; needs a wrappable callable target (`../../.claude/skills/run-assert-eval/workflows/govern-and-remeasure.md`). Never hand-drive an external `acs` CLI for this loop.
 - **One atomic behavior per config** — split N selected risks into N configs run sequentially; never bundle.
 - **Triage before running** — never auto-generate an eval for every Clarity failure mode; ask which to measure now.
 - **Don't invent metrics** — only report what's in the artifacts.

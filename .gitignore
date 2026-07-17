@@ -84,3 +84,6 @@ README_preannounce.md
 # Generated eval configs written by the measure-clarity-failures workflow
 # (evals/<failure-slug>/eval_config.yaml). Per-target output; adopters may commit these.
 /evals/
+# Per-domain governance ledger written by the govern-and-remeasure workflow.
+# Local working artifact (holds SharePoint links); adopters may commit their own.
+/governance-ledger.md
