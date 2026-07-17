@@ -187,6 +187,94 @@ class ViewerServerArtifactsTest(unittest.TestCase):
             self.assertEqual(prompt_rows[0]["score_keys"], ["policy_violation"])
             self.assertEqual(audit_rows, [])
 
+    def test_build_viewer_read_model_preserves_string_grade_contract(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            tmp_root = Path(tmp_dir)
+            suite_dir = tmp_root / "suite-a"
+            run_dir = suite_dir / "run-a"
+            run_dir.mkdir(parents=True, exist_ok=True)
+            scale = {
+                "ungrounded_policy_claim": {
+                    "type": "ordinal",
+                    "values": [
+                        {"value": "good", "label": "Substantive ungrounded claim"},
+                        {"value": "medium", "label": "Limited ungrounded claim"},
+                        {"value": "bad", "label": "No ungrounded claim"},
+                    ],
+                }
+            }
+            (suite_dir / "test_set.jsonl").write_text(
+                json.dumps(
+                    {
+                        "type": "prompt",
+                        "test_case_id": "test-case-1",
+                        "behavior": "behavior",
+                        "dimensions": {"behavior": "behavior"},
+                        "seed": {"description": "Prompt seed"},
+                    }
+                ) + "\n",
+                encoding="utf-8",
+            )
+            (run_dir / "manifest.json").write_text(
+                json.dumps({"status": "completed", "stages": {"inference": "completed", "judge": "completed"}}),
+                encoding="utf-8",
+            )
+            (run_dir / "config.yaml").write_text(
+                "pipeline:\n  inference:\n    target:\n      model:\n        name: target-model\n",
+                encoding="utf-8",
+            )
+            (run_dir / "inference_set.jsonl").write_text(
+                json.dumps(
+                    {
+                        "type": "prompt",
+                        "test_case_id": "test-case-1",
+                        "behavior": "behavior",
+                        "target": "target-model",
+                        "events": [],
+                        "llm_calls": [],
+                    }
+                ) + "\n",
+                encoding="utf-8",
+            )
+            (run_dir / "scores.jsonl").write_text(
+                json.dumps(
+                    {
+                        "type": "prompt",
+                        "test_case_id": "test-case-1",
+                        "behavior": "behavior",
+                        "judge_model": "judge-model",
+                        "target": "target-model",
+                        "judge_status": "ok",
+                        "score_keys": ["ungrounded_policy_claim"],
+                        "not_applicable_score_keys": ["ungrounded_policy_claim"],
+                        "dimension_scales": scale,
+                        "verdict": {
+                            "dimensions": {"ungrounded_policy_claim": "good"},
+                            "dimension_applicability": {"ungrounded_policy_claim": True},
+                            "dimension_justifications": {"ungrounded_policy_claim": "claim [1]"},
+                            "node_judgments": [],
+                        },
+                    }
+                ) + "\n",
+                encoding="utf-8",
+            )
+
+            build_run_viewer_artifacts(run_dir)
+            prompt_rows = json.loads(
+                (run_dir / ".viewer" / "viewer_prompt_rows.json").read_text(encoding="utf-8")
+            )
+
+            self.assertEqual(
+                prompt_rows[0]["verdict"]["dimensions"]["ungrounded_policy_claim"],
+                "good",
+            )
+            self.assertEqual(prompt_rows[0]["score_keys"], ["ungrounded_policy_claim"])
+            self.assertEqual(
+                prompt_rows[0]["not_applicable_score_keys"],
+                ["ungrounded_policy_claim"],
+            )
+            self.assertEqual(prompt_rows[0]["dimension_scales"], scale)
+
     def test_build_viewer_read_model_uses_versioned_seed_artifact_from_manifest(self) -> None:
         with TemporaryDirectory() as tmp_dir:
             tmp_root = Path(tmp_dir)
