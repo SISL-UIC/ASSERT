@@ -76,9 +76,76 @@ tool-gate failure the rules land at `pre_tool_call` / `post_tool_call`.
 
 - Thresholds: `--min-rate` / `--min-count` to include only material findings.
 - `--no-validate` to skip the built-in validation pass.
+- `--model azure/<deployment>` (e.g. `azure/gpt-5.4`) so litellm uses the Azure
+  path. `assert-ai acs` loads the project `.env` automatically (same as
+  `assert-ai run`) — do NOT hand-export credentials into the shell.
 
 **Review the generated Rego and `report.md`** before trusting them (LLM-authored;
 confirm the failure class is captured without over-denying permissible content).
+
+## Step 2a — Choose the right policy style for the failure
+
+`assert-ai acs generate` emits an **annotator-based** Rego: it conditions on
+`input.annotations.<classifier>.*` fields produced by LLM annotators at each tool
+step. Which style you want depends on what the failure conditions on:
+
+- **Semantic / content failures** (toxicity, PII leakage, jailbreak phrasing,
+  unsafe advice) — **keep the annotator-based policy.** There's no structural
+  field to key on; an LLM judgment is exactly right, and the ACS host populates
+  `input.annotations.*` at runtime.
+- **Structural / argument-based gates** (cross-tenant account scoping, refund-cap
+  arithmetic, verification-state gate) — **prefer a deterministic Rego** that
+  conditions on the tool arguments or session state. It's a plain comparison, so
+  it validates reliably and enforces without an extra per-step model call.
+
+Two caveats specific to annotator-based policies, so they aren't mistaken for
+broken:
+
+1. **Offline `validate` reports `handled 0/N`** — nothing populates
+   `input.annotations.*` during `assert-ai acs validate`, so an argument-based
+   gate *looks* inert even though it would fire at runtime. If the gate is really
+   structural, that's the signal to switch to deterministic Rego (this is what
+   sent Run 2 down a reverse-engineering path).
+2. A per-tool-step LLM call adds latency and non-determinism — fine for semantic
+   gates, wasteful for a gate that's just `account_id != caller`.
+
+**The real OPA input contract** (what Rego actually sees — do not guess
+`input.tool_call.*`, that path is wrong):
+
+| Path | Value |
+| --- | --- |
+| `input.tool.name` | the tool name being called |
+| `input.policy_target.value` | the resolved policy target — at `pre_tool_call` with `policy_target: $.tool_call.args` this is the **args dict** (`input.policy_target.value.account_id`); at `post_tool_call` with `policy_target: $.tool_result` it is the **result** (a string under offline `validate`, a dict at runtime) |
+| `input.annotations.<classifier>.*` | LLM-annotator outputs — populated at runtime, empty under offline `validate` |
+| snapshot fields | whatever the host passes in `_snapshot(state)` (e.g. `caller_account_id`, `verified`), surfaced per the manifest's snapshot wiring |
+
+Deterministic template (cross-tenant account scoping — adapt the tool set and
+condition for your failure):
+
+```rego
+package assert_guardrails
+
+account_scoped_tools := {
+    "get_account_profile", "get_invoices", "issue_refund",
+    "change_plan", "cancel_plan", "update_payment_method",
+}
+
+# pre_tool_call: deny an account-scoped call whose account_id is not the caller.
+deny contains msg if {
+    input.tool.name in account_scoped_tools
+    requested := input.policy_target.value.account_id
+    requested != ""
+    requested != "ACME-1001"   # the authenticated caller (or a snapshot field)
+    msg := sprintf("cross-account access denied: %v != caller", [requested])
+}
+```
+
+**If you are unsure of the exact input shape**, capture it once instead of
+guessing: build the control from the manifest, evaluate one known-bad example
+through `NativeRuntimeClient`, and print the result's `policy_input` — that is
+the literal document handed to Rego. Delete the throwaway probe afterward
+(never leave debug scripts under `artifacts/`).
+
 
 ## Step 3 — Validate the policy against known-bad findings
 
@@ -91,6 +158,18 @@ Reports how many known-bad examples the policy `handled` and `strongly blocked`.
 Use `--require-block` in a gate to fail unless every known-bad example is
 strongly blocked, or `--fail-on-allow` to fail if any is allowed.
 
+**Offline `validate` only exercises deterministic rules.** It wires no annotator
+dispatcher, so `input.annotations.*` is never populated and **annotator-based
+rules cannot fire here** — they show up as `handled 0/N`. When the effective
+policy conditions on annotators, `validate` prints a `Note:` saying so; that
+`0/N` is **expected, not a defect**. Only a **deterministic** gate (on
+`input.policy_target.value` / `input.tool.name`) is truly testable offline. An
+annotator/semantic gate is validated **only** by the guarded remeasure run
+(Step 4/5), where the ACS host runs the annotators and the violation rate should
+drop. So: `--require-block`/`--fail-on-allow` are meaningful gates for
+deterministic policies; for annotator policies, treat the remeasure delta as the
+real pass/fail signal.
+
 ## Step 4 — Governed run (Run B)
 
 Point the ACS-governed callable at the generated manifest and re-run the **same**
@@ -101,8 +180,25 @@ or the default `artifacts/acs/<suite>/manifest.yaml`:
 assert-ai run --config evals/<slug>/eval_config.governed.yaml
 ```
 
-`eval_config.governed.yaml` is identical to the baseline except `run:`
-(e.g. `gpt54-acs-governed`) and `target.callable` (the governed entrypoint).
+**Create `eval_config.governed.yaml` by COPYING `eval_config.baseline.yaml` and
+changing ONLY two lines** — `run:` (e.g. `gpt54-acs-governed`) and
+`target.callable` (the governed entrypoint). Do **not** re-author it from a
+template or edit any other field. The `systematize` and `test_set` stages are
+cached per suite and keyed by a hash of the behavior + those stages' config
+(NOT by `run` or `target.callable`), so a byte-identical spec makes the governed
+run **reuse the baseline's exact test cases** — a true A/B. Any drift in
+`behavior`, `stratify`, `sample_size`, or a stage prompt busts the hash, and
+because `systematize` is non-deterministic (temperature 1.0) the governed run
+then draws **different** test cases, degrading the comparison to aggregate-only.
+
+**Verify the reuse before trusting the delta.** The governed run must log the
+`systematize` and `test_set` stages as **reused/cached**, not regenerated. If it
+regenerated, the two configs drifted — diff them (`git diff --no-index
+eval_config.baseline.yaml eval_config.governed.yaml` should show only the `run`
+and `target.callable` lines), fix, and rerun. **Never** pass `--force-stage
+systematize` or `--force-stage test_set` on the governed run — that forces a new
+test set and breaks the A/B by construction.
+
 On a `deny` verdict the guarded tool raises `AgentControlBlocked`; the agent
 feeds the block back to the model and cannot complete the unverified action, so
 `policy_violation` should drop. Watch `overrefusal` for over-denial.
@@ -162,7 +258,9 @@ by an ACS policy at `artifacts/acs/<suite>/`, baseline `X%` dropped to `Y%`.
   and `report.md` before deploying.
 - **Apples-to-apples A/B.** Baseline and governed runs differ only in `run:` and
   `target.callable`; everything else (behavior, stratify, judge, sample sizes)
-  is identical.
+  is identical, so the governed run reuses the baseline's cached
+  `systematize`/`test_set` (see Step 4 — verify the reuse before trusting the
+  delta).
 - **Customer-safe terminology.** Reference credential env var NAMES only; never
   read/print/commit `.env`, `artifacts/`, or exported HTML.
 
