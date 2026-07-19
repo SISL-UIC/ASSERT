@@ -95,8 +95,8 @@ Fill from the candidate behavior (real schema field names):
 | `behavior.description` | candidate `description` (the doc **Summary**, tightened to a *testable* statement) |
 | `context` | Clarity `summary.md` / `goal/requirements.md` / `solution/architecture.md` |
 | `pipeline.test_set.stratify.dimensions` | `candidate_dimensions` — **include the `elicitation_variant` dimension** derived from the doc's Variants |
-| `pipeline.test_set.prompt.sample_size` | **small for the first run (e.g. 10)** so results arrive fast |
-| `pipeline.test_set.scenario.sample_size` | small for the first run (e.g. 10) |
+| `pipeline.test_set.prompt.sample_size` | **noise-aware — see the sizing note below** (small e.g. 10 only for a throwaway first look; **≥25 if a stable rate matters**) |
+| `pipeline.test_set.scenario.sample_size` | same — **≥25 when the run will feed an ACS before/after A/B** (see `govern-and-remeasure.md`) |
 | `pipeline.inference.target` | the target shape (see below) |
 | `pipeline.judge.preset` + `dimensions` | keep the violation metric **and** `overrefusal` as **separate** dimensions (see the coupling note below) |
 
@@ -108,6 +108,21 @@ Fill from the candidate behavior (real schema field names):
 > `govern-and-remeasure.md`) `disabled_dimensions: [policy_violation]` and add a
 > custom, node-independent bad-event dimension (e.g. `unverified_high_risk_action`)
 > graded by its own rubric, keeping the built-in `overrefusal`.
+
+> **Sizing for noise (why the first-run "10" is often too small).** Each rate is
+> `violations / sample_size`, so at `sample_size: 10` **one flipped case moves the
+> number 10 percentage points**. Inference is non-deterministic (agent temperature
+> is 1.0; gpt-5 models can't be pinned lower), so two independent runs of the *same*
+> config drift by a case or two purely by chance. That noise is harmless for a quick
+> "is it broken?" look, but it **wrecks an ACS before/after A/B**: a phantom ±10pp
+> swing on a small sample can masquerade as a governance effect (or hide one).
+> Guidance: use `10` only for a throwaway first pass you don't intend to compare;
+> use **`sample_size: 25` or more** the moment a stable rate matters — and always
+> for a run that will become an A/B baseline, because the governed config is a
+> byte-identical copy that inherits this size (see `govern-and-remeasure.md`).
+> Cost scales linearly with sample size, so weigh speed vs. a trustworthy delta.
+> (`examples/incident_triage_agent`, the repo's reference governance A/B, ran at
+> `sample_size: 200`.)
 
 > `stratify.dimensions` entries are `{name, description}`. Fold the parser's
 > `values` list into each dimension's `description` (e.g. "Values: variant A;
@@ -200,7 +215,8 @@ failure mode now has a **measured baseline** and where the eval lives
 3. Triage: user picks **P1s only** → just `user_disengagement`.
 4. Generate `evals/user-disengagement/eval_config.yaml`: `behavior.description`
    from the doc Summary, `stratify.dimensions` includes `elicitation_variant`
-   (7 values folded into its description), `prompt.sample_size: 10`,
+   (7 values folded into its description), `prompt.sample_size: 10` (a fast first
+   pass — bump to ≥25 for a stable rate or an ACS A/B),
    `judge.dimensions` = `policy_violation` + `overrefusal`.
 5. Confirm → `assert-ai run` → results table: one `user_disengagement` column,
    `policy_violation` X% and `overrefusal` Y%, 3–5 cited examples.

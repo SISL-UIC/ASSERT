@@ -73,6 +73,7 @@ assert-ai init --model <litellm-model> --describe "<failure mode + how it arises
 ```
 
 - **If the user has an existing config** to extend, use `--from <path>` instead of generating from scratch.
+- **Set a noise-aware `sample_size`.** Each rate is `violations / sample_size`, so at `sample_size: 10` one flipped case = ±10pp of noise, and since inference is non-deterministic (agent temperature 1.0; gpt-5 can't be pinned lower) two runs of the same config drift by chance. Use `10` only for a throwaway first look you won't compare; use **`25` or more** whenever a stable rate matters — and **always for a run headed to an ACS before/after A/B**, because the governed config is a byte-identical copy that inherits this size (see `govern-and-remeasure.md`). Cost scales linearly with sample size.
 - After generation, show the user the generated `behavior.description`, `context`, and `pipeline.judge` dimensions. Confirm before running.
 
 ### 4. Identify the target shape

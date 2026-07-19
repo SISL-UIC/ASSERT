@@ -44,6 +44,12 @@ in this workflow is specific to billing.
    `artifacts/results/<suite>/<run>/`, keying its guardrail off the violated
    non-permissible nodes in `node_judgments` (not the `policy_violation`
    dimension), so disabling that dimension does not affect `acs generate`.
+   **Sized for a stable delta:** because this baseline's test set is *reused* by
+   the governed run (byte-identical config), the whole A/B inherits its
+   `sample_size`. At `sample_size: 10` one flipped case is ±10pp of noise that can
+   masquerade as — or bury — the governance effect. If the baseline was a quick
+   first pass at `10`, **raise `sample_size` to ≥25 in the baseline config and
+   re-run it before comparing** (see the sizing note in `measure-clarity-failures.md`).
 2. **The ACS extra is installed**: `python -m pip install -e ".[acs]"` (pulls in
    the `agent-control-specification` SDK). Verify with `assert-ai acs --help`.
 3. **`opa` is on PATH** (Open Policy Agent) — required to evaluate the generated
