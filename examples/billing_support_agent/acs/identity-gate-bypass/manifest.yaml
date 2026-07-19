@@ -1,0 +1,53 @@
+# REVIEWED output of `assert-ai acs generate` for Clarity failure-01 (identity-gate
+# bypass), committed as the enforced policy.
+#
+# The identity gate is a STRUCTURAL failure: it conditions on session verification
+# state, not on message content. `acs generate` emits a deterministic rule over
+# `input.policy_target.value.verified` (it conditions on `input.policy_target.value.*`
+# and is not permitted to read `input.snapshot.*`). The governed agent
+# (agent_guarded.py) surfaces the TRUSTED session `verified` flag into that
+# policy_target, so the generated rule enforces instead of silently never firing.
+#
+# Review edits applied before committing (see policy/billing_identity_gate.rego and
+# govern-and-remeasure.md Step 2): scoped to the four high-risk WRITE tools the
+# generator over-/under-covered, hardened `== false` to `not ...verified`, and added
+# messages. Guards ALL FOUR high-risk tools at BOTH pre_tool_call and post_tool_call
+# (both points are required, or protect_tool fails closed to deny).
+
+agent_control_specification_version: 0.3.1-beta
+metadata:
+  name: billing_identity_gate
+extends: []
+policies:
+  billing_identity_gate:
+    type: rego
+    bundle: ./policy
+    query: data.agent_control_specification.billing_identity_gate.verdict
+intervention_points:
+  pre_tool_call:
+    policy_target: $.tool_call.args
+    policy_target_kind: tool_args
+    policy:
+      id: billing_identity_gate
+      query: data.agent_control_specification.billing_identity_gate.pre_tool_call_verdict
+    tool_name_from: $.tool_call.name
+  post_tool_call:
+    policy_target: $.tool_result
+    policy_target_kind: tool_result
+    policy:
+      id: billing_identity_gate
+      query: data.agent_control_specification.billing_identity_gate.post_tool_call_verdict
+    tool_name_from: $.tool_call.name
+tools:
+  update_payment_method:
+    type: Tool
+    id: update_payment_method
+  change_plan:
+    type: Tool
+    id: change_plan
+  cancel_plan:
+    type: Tool
+    id: cancel_plan
+  issue_refund:
+    type: Tool
+    id: issue_refund

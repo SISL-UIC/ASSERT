@@ -20,7 +20,32 @@ PATH. Generate the manifest first::
         --out artifacts/acs/<suite>
 
 Point this module at the manifest with ``BILLING_ACS_MANIFEST`` or rely on the
-default ``artifacts/acs/billing-support-identity-verification-bypass/manifest.yaml``.
+default committed reference policy at
+``examples/billing_support_agent/acs/identity-gate-bypass/manifest.yaml``. That
+policy is the **reviewed** output of ``assert-ai acs generate``: the generator
+writes a *draft* under ``artifacts/acs/<suite>/`` that is reviewed (scope the
+gated tool set, tighten the condition) and then committed as the enforced policy.
+
+The identity gate is a STRUCTURAL failure — it depends on session verification
+state, not message content. ``acs generate`` conditions structural rules on
+``input.policy_target.value.*`` (it does not read ``input.snapshot.*``), so it
+emits e.g. ``input.policy_target.value.verified == false``. This module therefore
+surfaces the TRUSTED session ``verified`` flag into the tool-call policy_target
+(see ``_policy_target_args`` / ``_POLICY_CONTEXT_KEYS``), sourced from the agent's
+own session state rather than the model's arguments, so the generated rule
+enforces correctly. The injected keys are stripped before the real tool runs.
+
+One guarded agent serves both billing suites, so the manifest and the guarded
+tool set are selected per governed run via environment variables:
+
+* ``BILLING_ACS_MANIFEST`` — path to the manifest to enforce (defaults to the
+  identity-gate manifest).
+* ``BILLING_ACS_GUARDED_TOOLS`` — comma-separated tool names to route through
+  ACS. Defaults to the high-risk write tools only (the identity-gate scope).
+  For the cross-customer suite set it to the data-lookup + high-risk tools so
+  tenant-isolation is enforced on reads too. Scoping the guarded set to the
+  tools a given failure actually needs avoids inflating ``overrefusal`` by
+  gating unrelated calls.
 """
 
 from __future__ import annotations
@@ -42,6 +67,7 @@ from examples.billing_support_agent.agent import (
     _build_tools,
     _json_dumps,
     _message_to_dict,
+    _seed_messages,
     _tool_call_parts,
     _tracer,
 )
@@ -49,20 +75,41 @@ from examples.billing_support_agent.agent import (
 import litellm
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
+# Default to the committed, REVIEWED reference policy (see
+# ./acs/identity-gate-bypass/). `assert-ai acs generate` writes a DRAFT under
+# artifacts/acs/<suite>/; the committed policy here is that draft after review
+# (tool-scope + condition tightened). This agent surfaces the trusted `verified`
+# flag into the tool-call policy_target so the generated `input.policy_target.value.verified`
+# rule enforces. Override with BILLING_ACS_MANIFEST (e.g. to enforce a freshly
+# generated draft or the cross-customer manifest).
 _DEFAULT_MANIFEST = (
     _REPO_ROOT
-    / "artifacts"
+    / "examples"
+    / "billing_support_agent"
     / "acs"
-    / "billing-support-identity-verification-bypass"
+    / "identity-gate-bypass"
     / "manifest.yaml"
 )
 
 # Read-only lookups that expose account data. They are not high-risk *write*
 # actions, but they are the tool boundary where cross-tenant data exposure
-# happens, so they are routed through ACS too. Combined with HIGH_RISK_TOOLS this
-# is the full set of tools whose calls are evaluated by the loaded policy.
+# happens, so they can be routed through ACS for the cross-customer suite.
 DATA_LOOKUP_TOOLS = frozenset({"get_account_profile", "get_invoices"})
-GUARDED_TOOLS = HIGH_RISK_TOOLS | DATA_LOOKUP_TOOLS
+
+# Which tools are routed through ACS. Scope this to the tools the governed
+# failure actually needs so unrelated calls are not gated (which would inflate
+# `overrefusal`). Defaults to the high-risk write tools (the identity-gate
+# scope); override per run with BILLING_ACS_GUARDED_TOOLS (comma-separated),
+# e.g. "get_account_profile,get_invoices,update_payment_method,..." for the
+# cross-customer suite.
+
+
+def _guarded_tools() -> frozenset[str]:
+    override = os.environ.get("BILLING_ACS_GUARDED_TOOLS")
+    if override:
+        names = {name.strip() for name in override.split(",") if name.strip()}
+        return frozenset(names)
+    return HIGH_RISK_TOOLS
 
 # Built lazily so importing this module (e.g. for `assert-ai acs eval-config`)
 # does not require the manifest to exist yet.
@@ -84,10 +131,8 @@ def _get_control() -> Any:
             raise FileNotFoundError(
                 "ACS manifest not found at "
                 f"{manifest}. Generate it first with:\n"
-                "  assert-ai acs generate --suite "
-                "billing-support-identity-verification-bypass "
-                "--run <baseline-run> --out artifacts/acs/"
-                "billing-support-identity-verification-bypass\n"
+                "  assert-ai acs generate --suite billing-identity-gate-bypass "
+                "--run baseline --out artifacts/acs/billing-identity-gate-bypass\n"
                 "or set BILLING_ACS_MANIFEST to an existing manifest.yaml."
             )
         _CONTROL = build_agent_control(str(manifest))
@@ -103,8 +148,9 @@ def _snapshot(state: dict[str, Any]) -> dict[str, Any]:
     """Per-call ambient snapshot the ACS policy can condition on.
 
     Exposes the session verification state under a few conventional keys so a
-    generated policy that gates high-risk tools on verification has the signal it
-    needs regardless of the exact field it references.
+    policy that gates high-risk tools on verification has the signal it needs
+    regardless of the exact field it references (`input.snapshot.verified`,
+    `input.snapshot.session.verified`, ...).
     """
     return {
         "verified": bool(state.get("verified")),
@@ -114,6 +160,42 @@ def _snapshot(state: dict[str, Any]) -> dict[str, Any]:
             "verified": bool(state.get("verified")),
             "verification_method": state.get("verification_method"),
         },
+    }
+
+
+# Trusted session-context keys the governed agent injects into the tool-call
+# policy_target (the ARGS the ACS runtime evaluates at `pre_tool_call`). ASSERT's
+# `acs generate` conditions structural rules on `input.policy_target.value.*`
+# (it is not permitted to read `input.snapshot.*`), so a generated session-state
+# gate typically emits e.g. `input.policy_target.value.verified == false`.
+# Surfacing the TRUSTED verification state here — sourced from the agent's own
+# session `state`, never from the model's tool arguments — makes that generated
+# rule enforce correctly instead of silently never firing. These keys are
+# stripped again before the real tool executes (see `_strip_policy_context`).
+_POLICY_CONTEXT_KEYS = ("verified", "verification_method", "caller_account_id")
+
+
+def _policy_target_args(state: dict[str, Any], args: dict[str, Any]) -> dict[str, Any]:
+    """Merge trusted session context over the model-supplied tool args.
+
+    The result is what the ACS runtime sees as `input.policy_target.value` at
+    `pre_tool_call`. Trusted keys win over any same-named model-supplied arg so a
+    policy cannot be bypassed by the model asserting `verified: true` itself.
+    """
+    return {
+        **dict(args),
+        "verified": bool(state.get("verified")),
+        "verification_method": state.get("verification_method"),
+        "caller_account_id": CALLER_ACCOUNT_ID,
+    }
+
+
+def _strip_policy_context(effective_args: Any) -> dict[str, Any]:
+    """Drop the injected trusted-context keys before the real tool runs."""
+    return {
+        key: value
+        for key, value in dict(effective_args).items()
+        if key not in _POLICY_CONTEXT_KEYS
     }
 
 
@@ -142,7 +224,7 @@ def _execute_guarded(
         return {"error": "invalid_arguments", "arguments": args["_invalid_json_arguments"]}
 
     # Tools outside the guarded set (verify_identity, escalate) run unguarded.
-    if tool_name not in GUARDED_TOOLS:
+    if tool_name not in _guarded_tools():
         try:
             return tool(**args)
         except Exception as exc:  # noqa: BLE001
@@ -151,12 +233,16 @@ def _execute_guarded(
     from agent_control_specification import AgentControlBlocked
 
     def _execute(effective_args: Any) -> Any:
-        return tool(**dict(effective_args))
+        return tool(**_strip_policy_context(effective_args))
 
     guarded = control.protect_tool(tool_name, _execute)
     try:
         outcome = _run_async(
-            guarded(args, tool_call_id=tool_call_id, snapshot=_snapshot(state))
+            guarded(
+                _policy_target_args(state, args),
+                tool_call_id=tool_call_id,
+                snapshot=_snapshot(state),
+            )
         )
     except AgentControlBlocked as blocked:
         reason = getattr(getattr(blocked, "result", None), "verdict", None)
@@ -178,15 +264,17 @@ def _execute_guarded(
     return getattr(outcome, "value", outcome)
 
 
-def chat_governed(message: str) -> str:
-    """Run one isolated billing-support turn with ACS enforcement on tool calls."""
+def chat_governed(message: str, history: list[dict[str, str]] | None = None) -> str:
+    """Run one billing-support turn with ACS enforcement on tool calls.
+
+    Mirrors :func:`chat_baseline`'s multi-turn contract: ``history`` (when ASSERT
+    supplies it) replays the prior turns so session verification persists across
+    a scenario, and the ACS policy is enforced at every guarded tool call.
+    """
     control = _get_control()
     state: dict[str, Any] = {}
     tool_registry = _build_tools(state)
-    messages: list[dict[str, Any]] = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": message},
-    ]
+    messages = _seed_messages(SYSTEM_PROMPT, message, history)
 
     with _tracer.start_as_current_span("agent.chat") as root_span:
         root_span.set_attribute("openinference.span.kind", "AGENT")

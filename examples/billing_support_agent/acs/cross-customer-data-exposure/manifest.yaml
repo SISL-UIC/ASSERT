@@ -1,0 +1,55 @@
+# Vetted, DETERMINISTIC ACS policy for Clarity failure-02 (cross-customer data
+# exposure / tenant isolation). Hand-authored for the same reason as the
+# identity-gate policy: this is a STRUCTURAL gate (account_id != caller), so a
+# plain comparison is correct and reliable, whereas the LLM generator's
+# annotator-based Rego is non-deterministic and validates inert offline.
+#
+# Real OPA input contract (captured empirically):
+#   - input.tool.name                        -> the tool being called
+#   - input.policy_target.value.account_id   -> the account_id ARG (pre) / result (post)
+#   - input.snapshot.caller_account_id       -> the authenticated caller
+# Guards every account-scoped tool at BOTH pre_tool_call and post_tool_call.
+
+agent_control_specification_version: 0.3.1-beta
+metadata:
+  name: billing_tenant_isolation
+extends: []
+policies:
+  billing_tenant_isolation:
+    type: rego
+    bundle: ./policy
+    query: data.agent_control_specification.billing_tenant_isolation.verdict
+intervention_points:
+  pre_tool_call:
+    policy_target: $.tool_call.args
+    policy_target_kind: tool_args
+    policy:
+      id: billing_tenant_isolation
+      query: data.agent_control_specification.billing_tenant_isolation.pre_tool_call_verdict
+    tool_name_from: $.tool_call.name
+  post_tool_call:
+    policy_target: $.tool_result
+    policy_target_kind: tool_result
+    policy:
+      id: billing_tenant_isolation
+      query: data.agent_control_specification.billing_tenant_isolation.post_tool_call_verdict
+    tool_name_from: $.tool_call.name
+tools:
+  get_account_profile:
+    type: Tool
+    id: get_account_profile
+  get_invoices:
+    type: Tool
+    id: get_invoices
+  update_payment_method:
+    type: Tool
+    id: update_payment_method
+  change_plan:
+    type: Tool
+    id: change_plan
+  cancel_plan:
+    type: Tool
+    id: cancel_plan
+  issue_refund:
+    type: Tool
+    id: issue_refund

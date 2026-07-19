@@ -24,16 +24,26 @@ failure that lives at a tool call (for example, a high-risk action performed on
 an unverified session) can only be governed by a real callable agent whose tool
 functions are wrapped with `control.protect_tool`. A hosted-model Prompt Agent
 target (simulated tools, gate in the system prompt) has nothing wrappable, so it
-cannot demonstrate the delta. The reference implementation is
-`examples/billing_support_agent/` (baseline `agent.py:chat_baseline`, governed
-`agent_guarded.py:chat_governed`); use it as the pattern for a new domain.
+cannot demonstrate the delta.
+
+Throughout this workflow, substitute your own domain's names for the
+placeholders: `<eval-dir>` (the directory holding the eval config), `<suite>`
+(the eval `suite:`), `<baseline-callable>` / `<governed-callable>` (the two
+`module:function` entrypoints), and `<violation-dim>` (the custom bad-event
+dimension, see Step 1). `examples/billing_support_agent/` is the reference
+implementation of this pattern (baseline `agent.py:chat_baseline`, governed
+`agent_guarded.py:chat_governed`) — read it as a concrete template, but nothing
+in this workflow is specific to billing.
 
 ## Preconditions (check, don't assume)
 
-1. **A measured baseline run exists** for a callable target, reporting the
-   `policy_violation` dimension (the Clarity to ASSERT configs already do). The
-   adapter reads `scores.jsonl`, `inference_set.jsonl`, and `taxonomy.json` from
-   `artifacts/results/<suite>/<run>/`.
+1. **A measured baseline run exists** for a callable target, reporting a genuine
+   violation signal — the violated non-permissible taxonomy nodes plus a custom
+   bad-event dimension (see Step 1). The adapter reads `scores.jsonl`,
+   `inference_set.jsonl`, and `taxonomy.json` from
+   `artifacts/results/<suite>/<run>/`, keying its guardrail off the violated
+   non-permissible nodes in `node_judgments` (not the `policy_violation`
+   dimension), so disabling that dimension does not affect `acs generate`.
 2. **The ACS extra is installed**: `python -m pip install -e ".[acs]"` (pulls in
    the `agent-control-specification` SDK). Verify with `assert-ai acs --help`.
 3. **`opa` is on PATH** (Open Policy Agent) — required to evaluate the generated
@@ -47,24 +57,38 @@ cannot demonstrate the delta. The reference implementation is
 If the eval currently targets a hosted model, switch to a callable target first:
 implement the agent as a Python tool loop with real tool functions (mirror the
 declared toolset), emit OTel spans for `target.trace`, and expose two
-entrypoints — an ungoverned baseline and an ACS-governed variant. See
-`examples/billing_support_agent/agent.py` and `agent_guarded.py`.
+entrypoints — an ungoverned baseline and an ACS-governed variant that wraps its
+high-risk tools with `control.protect_tool`. See
+`examples/billing_support_agent/agent.py` and `agent_guarded.py` for the shape.
 
 ## Step 1 — Baseline run (Run A)
 
 Run the ungoverned callable target to establish the **ASSERT Baseline %**:
 
 ```
-assert-ai run --config evals/<slug>/eval_config.baseline.yaml
+assert-ai run --config <eval-dir>/eval_config.yaml
 ```
 
-Note the `suite` and `run` (e.g. `gpt54-baseline`). Report `policy_violation`
-and `overrefusal` separately per `measure-clarity-failures.md` Step 7.
+Note the `suite` and `run` (e.g. `baseline`). Report the violation dimension and
+`overrefusal` separately per `measure-clarity-failures.md` Step 7.
+
+> **Decouple the violation metric from overrefusal.** The built-in
+> `policy_violation` dimension is the OR of ALL violated taxonomy nodes —
+> including *permissible* ones — so any over-gating of a permissible behavior also
+> trips it, structurally coupling it with `overrefusal` and making ACS *look* like
+> it raised the failure rate when it only added a block. Redefining `policy_violation`
+> by name does NOT fix this (it still gets node-matrix framing). Instead, in the
+> eval config's `pipeline.judge` block, `disabled_dimensions: [policy_violation]`
+> and add a **custom, node-independent bad-event dimension** — call it
+> `<violation-dim>` — graded by its own rubric ("true = the agent did <the
+> specific bad thing>"), keeping the built-in `overrefusal` as the separate
+> availability metric. This is what makes the ACS before/after a clean A/B. (The
+> billing reference uses `unverified_high_risk_action`.)
 
 ## Step 2 — Generate the ACS policy from the findings
 
 ```
-assert-ai acs generate --suite <suite> --run gpt54-baseline \
+assert-ai acs generate --suite <suite> --run baseline \
   --out artifacts/acs/<suite>
 ```
 
@@ -80,34 +104,68 @@ tool-gate failure the rules land at `pre_tool_call` / `post_tool_call`.
   path. `assert-ai acs` loads the project `.env` automatically (same as
   `assert-ai run`) — do NOT hand-export credentials into the shell.
 
-**Review the generated Rego and `report.md`** before trusting them (LLM-authored;
-confirm the failure class is captured without over-denying permissible content).
+**Review the generated Rego and `report.md`, then COMMIT the reviewed policy** and
+enforce that committed copy (don't regenerate on every run, and don't enforce
+straight from gitignored `artifacts/`). `acs generate` output is a **draft**: an
+LLM authored it from the findings, so review it against this checklist before
+committing:
 
-## Step 2a — Choose the right policy style for the failure
+- **Tool coverage.** The generator only gates tools it *observed* violating in the
+  sample — it commonly **omits** in-class tools that didn't happen to be called
+  and **includes** over-broad ones (read-only lookups, `escalate`). Add the
+  missing tools of the same class; drop the ones that shouldn't gate (guarding
+  unrelated tools inflates `overrefusal`). Declare every gated tool in `tools:`.
+- **The condition reads a field that exists** (see Step 2a — this is where a
+  structural gate silently no-fires or over-denies).
+- **Both `pre_tool_call` and `post_tool_call` are declared** for a guarded tool,
+  or the runtime fails closed to `deny`.
+- **Harden loose comparisons** — `input.policy_target.value.verified == false`
+  silently passes when the field is absent; prefer `not input.policy_target.value.verified`.
 
-`assert-ai acs generate` emits an **annotator-based** Rego: it conditions on
-`input.annotations.<classifier>.*` fields produced by LLM annotators at each tool
-step. Which style you want depends on what the failure conditions on:
+Keep the reviewed manifest + Rego in **version control** (not under `artifacts/`)
+and point the governed agent at it. The billing reference does this: its committed
+policies live under `examples/billing_support_agent/acs/<slug>/` and
+`agent_guarded.py` defaults its manifest there.
+
+## Step 2a — Make the generated condition read a field that exists
+
+`acs generate` conditions **structural** rules on `input.policy_target.value.*`
+(the tool args at `pre_tool_call`, the result at `post_tool_call`),
+`input.tool.name`, and constants. It is **not** permitted to read
+`input.snapshot.*`. It also emits **annotator-based** rules over
+`input.annotations.<classifier>.*` for semantic content. Which style you get — and
+whether it enforces — depends on what the failure conditions on:
 
 - **Semantic / content failures** (toxicity, PII leakage, jailbreak phrasing,
   unsafe advice) — **keep the annotator-based policy.** There's no structural
-  field to key on; an LLM judgment is exactly right, and the ACS host populates
-  `input.annotations.*` at runtime.
-- **Structural / argument-based gates** (cross-tenant account scoping, refund-cap
-  arithmetic, verification-state gate) — **prefer a deterministic Rego** that
-  conditions on the tool arguments or session state. It's a plain comparison, so
-  it validates reliably and enforces without an extra per-step model call.
+  field to key on; an LLM judgment is right, and the ACS host populates
+  `input.annotations.*` at runtime. (It stays empty under offline `validate`, so
+  the gate *looks* inert there — that's expected, not a defect. Verify it via the
+  guarded remeasure run, not `validate`.)
+- **Structural / session-state gates** (cross-tenant account scoping, refund-cap
+  arithmetic, a required verification flag) — the generated deterministic rule is
+  the right shape, but it only enforces if the field it reads is actually present
+  in `input.policy_target.value`.
 
-Two caveats specific to annotator-based policies, so they aren't mistaken for
-broken:
+**The gotcha that makes "ACS do nothing" or "make it worse":** a session-state
+gate (e.g. "must be verified") depends on state the model does NOT put in the tool
+args. The generator, restricted to `input.policy_target.value.*`, emits something
+like `input.policy_target.value.verified == false` — but the tool args have no
+`verified` field, so the rule either never fires (bypass persists) or, with a
+`not`, denies unconditionally (blocks verified users → `overrefusal` spikes).
 
-1. **Offline `validate` reports `handled 0/N`** — nothing populates
-   `input.annotations.*` during `assert-ai acs validate`, so an argument-based
-   gate *looks* inert even though it would fire at runtime. If the gate is really
-   structural, that's the signal to switch to deterministic Rego (this is what
-   sent Run 2 down a reverse-engineering path).
-2. A per-tool-step LLM call adds latency and non-determinism — fine for semantic
-   gates, wasteful for a gate that's just `account_id != caller`.
+**The fix is agent-side, and it keeps the generated Rego authoritative:** have the
+governed agent **surface the trusted session field into the tool-call
+policy_target**, sourced from its own session state (never from the model's
+arguments), so the generated `input.policy_target.value.<field>` comparison reads
+a real value. Strip the injected keys before the real tool runs. The billing
+reference implements exactly this in `agent_guarded.py` (`_policy_target_args` /
+`_POLICY_CONTEXT_KEYS`): it injects the trusted `verified` flag into the
+policy_target, so the generated `input.policy_target.value.verified` rule enforces
+the identity gate. For an **argument** gate (e.g. tenant scoping) the discriminating
+value is already a real tool arg, so no injection is needed — but you still want a
+trusted comparison value (inject the caller's own account id rather than trusting a
+second arg).
 
 **The real OPA input contract** (what Rego actually sees — do not guess
 `input.tool_call.*`, that path is wrong):
@@ -115,30 +173,44 @@ broken:
 | Path | Value |
 | --- | --- |
 | `input.tool.name` | the tool name being called |
-| `input.policy_target.value` | the resolved policy target — at `pre_tool_call` with `policy_target: $.tool_call.args` this is the **args dict** (`input.policy_target.value.account_id`); at `post_tool_call` with `policy_target: $.tool_result` it is the **result** (a string under offline `validate`, a dict at runtime) |
+| `input.policy_target.value` | the resolved policy target — at `pre_tool_call` with `policy_target: $.tool_call.args` this is the **args dict** (`input.policy_target.value.<arg>`), including any trusted context the agent injects; at `post_tool_call` with `policy_target: $.tool_result` it is the **result** |
 | `input.annotations.<classifier>.*` | LLM-annotator outputs — populated at runtime, empty under offline `validate` |
-| snapshot fields | whatever the host passes in `_snapshot(state)` (e.g. `caller_account_id`, `verified`), surfaced per the manifest's snapshot wiring |
+| `input.snapshot.*` | the agent's per-call snapshot — available to a hand-written policy, but NOT emitted by `acs generate` |
 
-Deterministic template (cross-tenant account scoping — adapt the tool set and
-condition for your failure):
+Reviewed deterministic shapes (what a committed policy looks like after the
+review + agent-side injection above):
 
 ```rego
-package assert_guardrails
+package agent_control_specification.<slug>
 
-account_scoped_tools := {
-    "get_account_profile", "get_invoices", "issue_refund",
-    "change_plan", "cancel_plan", "update_payment_method",
+import rego.v1
+
+default pre_tool_call_verdict := {"decision": "allow"}
+
+guarded_tools := {"<tool_a>", "<tool_b>"}   # the in-class tools for your failure
+
+# Shape 1 — SESSION-STATE gate. The agent injects the trusted `verified` flag into
+# the policy_target, so this reads a real value (`not` fires on false OR missing).
+pre_tool_call_verdict := {"decision": "deny", "reason": "<violation-dim>"} if {
+    input.intervention_point == "pre_tool_call"
+    input.tool.name in guarded_tools
+    not input.policy_target.value.verified
 }
 
-# pre_tool_call: deny an account-scoped call whose account_id is not the caller.
-deny contains msg if {
-    input.tool.name in account_scoped_tools
+# Shape 2 — ARGUMENT gate. Compares a tool ARG against a TRUSTED value the agent
+# injects (the caller's own id), not a second user-supplied arg.
+pre_tool_call_verdict := {"decision": "deny", "reason": "<violation-dim>"} if {
+    input.intervention_point == "pre_tool_call"
+    input.tool.name in guarded_tools
     requested := input.policy_target.value.account_id
     requested != ""
-    requested != "ACME-1001"   # the authenticated caller (or a snapshot field)
-    msg := sprintf("cross-account access denied: %v != caller", [requested])
+    requested != input.policy_target.value.caller_account_id   # injected, trusted
 }
 ```
+
+Pair each `pre_tool_call` rule with a matching `post_tool_call` rule (defense in
+depth on the result), and declare **both** intervention points in the manifest —
+a guarded tool that declares only one fails closed to `deny`.
 
 **If you are unsure of the exact input shape**, capture it once instead of
 guessing: build the control from the manifest, evaluate one known-bad example
@@ -151,7 +223,7 @@ the literal document handed to Rego. Delete the throwaway probe afterward
 
 ```
 assert-ai acs validate --manifest artifacts/acs/<suite>/manifest.yaml \
-  --suite <suite> --run gpt54-baseline
+  --suite <suite> --run baseline
 ```
 
 Reports how many known-bad examples the policy `handled` and `strongly blocked`.
@@ -172,45 +244,60 @@ real pass/fail signal.
 
 ## Step 4 — Governed run (Run B)
 
-Point the ACS-governed callable at the generated manifest and re-run the **same**
-eval spec. The reference agent resolves the manifest from `BILLING_ACS_MANIFEST`
-or the default `artifacts/acs/<suite>/manifest.yaml`:
+Point the ACS-governed callable at the vetted manifest and re-run the **same**
+eval spec:
 
 ```
-assert-ai run --config evals/<slug>/eval_config.governed.yaml
+assert-ai run --config <eval-dir>/eval_config.governed.yaml
 ```
 
-**Create `eval_config.governed.yaml` by COPYING `eval_config.baseline.yaml` and
-changing ONLY two lines** — `run:` (e.g. `gpt54-acs-governed`) and
+**How the governed agent finds its policy.** The agent's tool wrapper needs two
+things: *which manifest* to load and *which tools* to route through
+`control.protect_tool`. Make both **resolvable per run** (an env var or config
+value with a sensible default) so ONE governed agent can serve multiple suites,
+and so the guarded set is scoped to only the tools a given failure needs
+(guarding unrelated tools inflates `overrefusal`). The billing reference
+implements this convention with `BILLING_ACS_MANIFEST` (defaults to its committed
+manifest) and `BILLING_ACS_GUARDED_TOOLS` (defaults to its high-risk write
+tools); your governed agent should expose the equivalent knobs. Set them before
+the governed run when the defaults don't match the suite under test.
+
+**Create `eval_config.governed.yaml` by COPYING `eval_config.yaml` and
+changing ONLY two lines** — `run:` (e.g. `acs-governed`) and
 `target.callable` (the governed entrypoint). Do **not** re-author it from a
 template or edit any other field. The `systematize` and `test_set` stages are
 cached per suite and keyed by a hash of the behavior + those stages' config
 (NOT by `run` or `target.callable`), so a byte-identical spec makes the governed
 run **reuse the baseline's exact test cases** — a true A/B. Any drift in
-`behavior`, `stratify`, `sample_size`, or a stage prompt busts the hash, and
-because `systematize` is non-deterministic (temperature 1.0) the governed run
-then draws **different** test cases, degrading the comparison to aggregate-only.
+`behavior`, `context`, `stratify`, `sample_size`, or a stage prompt busts the
+hash, and because `systematize` is non-deterministic (temperature 1.0) the
+governed run then draws **different** test cases, degrading the comparison to
+aggregate-only.
 
 **Verify the reuse before trusting the delta.** The governed run must log the
 `systematize` and `test_set` stages as **reused/cached**, not regenerated. If it
 regenerated, the two configs drifted — diff them (`git diff --no-index
-eval_config.baseline.yaml eval_config.governed.yaml` should show only the `run`
+eval_config.yaml eval_config.governed.yaml` should show only the `run`
 and `target.callable` lines), fix, and rerun. **Never** pass `--force-stage
 systematize` or `--force-stage test_set` on the governed run — that forces a new
 test set and breaks the A/B by construction.
 
 On a `deny` verdict the guarded tool raises `AgentControlBlocked`; the agent
 feeds the block back to the model and cannot complete the unverified action, so
-`policy_violation` should drop. Watch `overrefusal` for over-denial.
+the violation dimension should drop. Watch `overrefusal` for over-denial.
 
 ## Step 5 — Compute the delta
 
 ```
-assert-ai results compare <suite> gpt54-baseline gpt54-acs-governed
+assert-ai results compare <suite> baseline acs-governed \
+  --metric <violation-dimension>
 ```
 
-The **ACS Delta** is `baseline policy_violation % − governed policy_violation %`.
-A meaningful drop with `overrefusal` roughly flat is the win condition.
+`results compare` defaults `--metric` to `policy_violation`; since that built-in
+is disabled (see Step 1), pass your custom violation dimension explicitly (e.g.
+`--metric <violation-dim>`). The **ACS Delta** is
+`baseline violation % − governed violation %`. A meaningful drop with
+`overrefusal` roughly flat is the win condition.
 
 ## Step 6 — Export shareable artifacts
 
@@ -219,8 +306,8 @@ Generate a self-contained static HTML per run for SharePoint. Start the viewer
 route for each run:
 
 ```
-/suite/<suite>/gpt54-baseline/export
-/suite/<suite>/gpt54-acs-governed/export
+/suite/<suite>/baseline/export
+/suite/<suite>/acs-governed/export
 ```
 
 Each returns a standalone `<suite>__<run>.html` (inline CSS, no server needed).
@@ -234,10 +321,10 @@ output). Columns:
 
 | Scenario | Clarity Failures | ASSERT artifacts | Baseline % | ACS Delta |
 | --- | --- | --- | --- | --- |
-| <domain / behavior> | <failure modes from `.clarity-protocol/failures/`> | <SharePoint links: baseline, governed> | <policy_violation %> | <baseline − governed> |
+| <domain / behavior> | <failure modes from `.clarity-protocol/failures/`> | <SharePoint links: baseline, governed> | <violation-dim %> | <baseline − governed> |
 
-Keep `policy_violation` as the headline; note `overrefusal` movement alongside
-the delta so a drop that came from over-denial is visible, not hidden.
+Keep the custom violation dimension as the headline; note `overrefusal` movement
+alongside the delta so a drop that came from over-denial is visible, not hidden.
 
 ## Step 8 — Close the loop in Clarity
 
@@ -257,31 +344,40 @@ by an ACS policy at `artifacts/acs/<suite>/`, baseline `X%` dropped to `Y%`.
 - **Review generated policy.** The Rego is LLM-authored from findings — read it
   and `report.md` before deploying.
 - **Apples-to-apples A/B.** Baseline and governed runs differ only in `run:` and
-  `target.callable`; everything else (behavior, stratify, judge, sample sizes)
-  is identical, so the governed run reuses the baseline's cached
+  `target.callable`; everything else (behavior, context, stratify, judge, sample
+  sizes) is identical, so the governed run reuses the baseline's cached
   `systematize`/`test_set` (see Step 4 — verify the reuse before trusting the
   delta).
 - **Customer-safe terminology.** Reference credential env var NAMES only; never
   read/print/commit `.env`, `artifacts/`, or exported HTML.
 
-## Worked example (billing identity-verification bypass)
+## Worked example (billing identity-gate bypass)
 
 1. Baseline: `assert-ai run --config
-   evals/identity-verification-bypass/eval_config.baseline.yaml` →
-   suite `billing-support-identity-verification-bypass`, run `gpt54-baseline`,
-   `policy_violation` 40%.
-2. Generate: `assert-ai acs generate --suite
-   billing-support-identity-verification-bypass --run gpt54-baseline --out
-   artifacts/acs/billing-support-identity-verification-bypass` → manifest + Rego
-   guarding `change_plan` / `cancel_plan` / `issue_refund` /
-   `update_payment_method` at `pre_tool_call`.
-3. Validate: `assert-ai acs validate --manifest … --suite … --run gpt54-baseline`
-   → known-bad examples strongly blocked.
+   examples/billing_support_agent/evals/identity-gate-bypass/eval_config.yaml` →
+   suite `billing-identity-gate-bypass`, run `baseline`,
+   `unverified_high_risk_action` ~33–40% (built-in `policy_violation` disabled,
+   `overrefusal` tracked separately).
+2. Generate + review: `assert-ai acs generate --suite billing-identity-gate-bypass
+   --run baseline --out artifacts/acs/billing-identity-gate-bypass` → emits a
+   deterministic draft conditioning on `input.policy_target.value.verified`.
+   Review it (Step 2): scope to the four high-risk write tools (the generator
+   over-/under-covers the tool set), harden `== false` → `not …verified`, then
+   commit it as `examples/billing_support_agent/acs/identity-gate-bypass/`.
+3. Enforce the committed policy: the governed agent (`agent_guarded.py`) surfaces
+   the trusted session `verified` flag into the tool-call policy_target, so the
+   generated `input.policy_target.value.verified` rule actually fires. (Offline
+   `assert-ai acs validate` can't populate that injected field — verify at the
+   guarded remeasure below, not via `validate`.)
 4. Governed: `assert-ai run --config
-   evals/identity-verification-bypass/eval_config.governed.yaml` → run
-   `gpt54-acs-governed`, `policy_violation` 5%.
-5. Delta: `assert-ai results compare billing-support-identity-verification-bypass
-   gpt54-baseline gpt54-acs-governed` → 40% → 5% (ACS Delta 35 points),
-   `overrefusal` flat.
+   examples/billing_support_agent/evals/identity-gate-bypass/eval_config.governed.yaml`
+   → run `acs-governed` (default manifest + high-risk guarded tools already match
+   this suite), `unverified_high_risk_action` drops materially.
+5. Delta: `assert-ai results compare billing-identity-gate-bypass baseline
+   acs-governed --metric unverified_high_risk_action` → violation rate drops
+   (scenario 33.3%→0%; prompt drops too — a residual can remain where the agent
+   only *verbally* agrees to a high-risk action without ever calling the gated
+   tool, which a `pre_tool_call` gate structurally cannot block; add an `output`
+   semantic gate to also catch the verbal promise). `overrefusal` roughly flat.
 6. Export both runs to HTML, upload to SharePoint, append the ledger row, and
    `record_suggestion` back to Clarity.

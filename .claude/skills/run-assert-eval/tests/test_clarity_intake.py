@@ -24,6 +24,7 @@ import clarity_intake as ci  # noqa: E402
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 REAL = FIXTURES / "clarity-protocol"
 SYNTHETIC = FIXTURES / "synthetic"
+MONOLITHIC = FIXTURES / "monolithic"
 
 
 # --- normalize_severity / priority ------------------------------------------
@@ -164,6 +165,59 @@ def test_build_candidate_behaviors_accepts_project_root_or_failures_dir():
 def test_build_missing_index_raises():
     with pytest.raises(FileNotFoundError):
         ci.build_candidate_behaviors(FIXTURES / "does-not-exist")
+
+
+# --- monolithic single-file format ------------------------------------------
+
+
+def test_monolithic_format_yields_one_candidate_per_failure():
+    candidates = ci.build_candidate_behaviors(MONOLITHIC)
+    # 3 failure-NN sections; the "Priority summary" section is ignored.
+    assert len(candidates) == 3
+    names = [c.name for c in candidates]
+    assert "identity_gate_bypass_on_high_risk_actions" in names
+    assert "prompt_injection_via_untrusted_tool_content" in names
+
+
+def test_monolithic_format_parses_severity_summary_and_variants():
+    candidates = ci.build_candidate_behaviors(MONOLITHIC)
+    identity = next(
+        c for c in candidates if c.name == "identity_gate_bypass_on_high_risk_actions"
+    )
+    assert identity.severity == "Critical"
+    assert identity.priority == "P1"
+    assert identity.description.startswith("The agent executes a high-risk action")
+    dim = next(d for d in identity.candidate_dimensions if d["name"] == "elicitation_variant")
+    assert len(dim["values"]) == 3
+    assert any("Urgency" in v for v in dim["values"])
+    assert identity.warnings == []
+
+
+def test_monolithic_severity_with_trailing_parenthetical():
+    candidates = ci.build_candidate_behaviors(MONOLITHIC)
+    injection = next(
+        c for c in candidates if c.name == "prompt_injection_via_untrusted_tool_content"
+    )
+    # "**Severity: High** (amplifier ...)" -> High, ignoring the parenthetical.
+    assert injection.severity == "High"
+    assert injection.priority == "P2"
+
+
+def test_monolithic_malformed_failure_degrades_without_crashing():
+    candidates = ci.build_candidate_behaviors(MONOLITHIC)
+    malformed = next(
+        c for c in candidates if c.name == "no_variants_failure_with_missing_summary"
+    )
+    assert malformed.severity == "Unknown"
+    assert any("unrecognized severity" in w for w in malformed.warnings)
+    assert any("Summary" in w for w in malformed.warnings)
+    assert any("no variants" in w for w in malformed.warnings)
+
+
+def test_monolithic_sorted_by_priority():
+    candidates = ci.build_candidate_behaviors(MONOLITHIC)
+    priorities = [c.priority for c in candidates]
+    assert priorities == sorted(priorities, key=lambda p: int(p[1:]))
 
 
 # --- tolerant degradation ---------------------------------------------------

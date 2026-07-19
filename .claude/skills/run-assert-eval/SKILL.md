@@ -173,8 +173,11 @@ the `inference_set.jsonl` row for a *specific case the judge already cited* is f
 bulk trace trawling is not.
 
 1. **Headline rates**: run `assert-ai results status <suite> <run>` for per-dimension
-   flagged rates (split into prompt and scenario). Report `policy_violation` and
-   `overrefusal` SEPARATELY — they are two different problems.
+   flagged rates (split into prompt and scenario). Report the violation dimension and
+   `overrefusal` SEPARATELY — they are two different problems. Note: the built-in
+   `policy_violation` ORs over ALL violated taxonomy nodes (permissible included), so
+   it couples with `overrefusal`; for a clean ACS A/B disable it and grade a custom
+   bad-event dimension (see `workflows/govern-and-remeasure.md`).
 
 2. **Top failing cases**: read `scores.jsonl` from `artifacts/results/<suite>/<run>/`.
    For each dimension with failures, pull 3-5 representative cases with:
@@ -250,7 +253,7 @@ re-measure to prove the rate dropped** — see Step 8 and
 - **Clarity is the required risk source** — for Run mode, risks come from Clarity (existing `.clarity-protocol/` or a fresh discovery run via the `run_clarity` MCP tool). Never substitute a plain-language guess or imitate Clarity's questioning from your own head; if the MCP tools can't be made available, stop and help fix it (`SETUP-CHECKLIST.md`).
 - **Drive the real Clarity MCP tools in-IDE** — use `run_clarity` / `write_protocol_document` / `record_failure` for discovery and `record_suggestion` to close the loop; never hand the user off to a separate Clarity app and never shell out to a `clarity cli` process.
 - **Close the loop** — after a run, offer `record_suggestion` (or `record_decision`) back into `.clarity-protocol/` noting the failure mode now has a measured baseline and where the eval lives, so Clarity's staleness tracking stays aware of it.
-- **Govern with ACS, don't just prompt-tweak** — to fix and *prove* it, generate an ACS policy from the findings (`assert-ai acs generate`) and re-run the same eval against the governed callable to show the delta; needs a wrappable callable target (`workflows/govern-and-remeasure.md`). Never hand-drive an external `acs` CLI for this loop.
+- **Govern with ACS, don't just prompt-tweak** — to fix and *prove* it, generate an ACS policy from the findings (`assert-ai acs generate`), **review and commit** it (scope the gated tools, tighten conditions), and re-run the same eval against the governed callable to show the delta; needs a wrappable callable target (`workflows/govern-and-remeasure.md`). For a session-state gate (e.g. verification), the governed agent must surface the trusted state into the tool-call **policy_target** so the generated `input.policy_target.value.*` rule actually fires. Never hand-drive an external `acs` CLI for this loop.
 - **One atomic behavior per config** — split N selected risks into N configs run sequentially; never bundle.
 - **Triage before running** — never auto-generate an eval for every Clarity failure mode; ask which to measure now.
 - **Don't invent metrics** — only report what's in the artifacts.

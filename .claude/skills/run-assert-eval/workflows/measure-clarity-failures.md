@@ -98,7 +98,16 @@ Fill from the candidate behavior (real schema field names):
 | `pipeline.test_set.prompt.sample_size` | **small for the first run (e.g. 10)** so results arrive fast |
 | `pipeline.test_set.scenario.sample_size` | small for the first run (e.g. 10) |
 | `pipeline.inference.target` | the target shape (see below) |
-| `pipeline.judge.preset` + `dimensions` | keep `policy_violation` **and** `overrefusal` as **separate** dimensions |
+| `pipeline.judge.preset` + `dimensions` | keep the violation metric **and** `overrefusal` as **separate** dimensions (see the coupling note below) |
+
+> **Built-in `policy_violation` couples with `overrefusal`.** The built-in
+> `policy_violation` dimension is the logical-OR over ALL violated taxonomy nodes
+> — including *permissible* ones — so over-gating a permissible behavior also trips
+> it, and it can never be fully separate from `overrefusal`. For a plain baseline
+> that's usually fine, but for a clean ACS before/after A/B (see
+> `govern-and-remeasure.md`) `disabled_dimensions: [policy_violation]` and add a
+> custom, node-independent bad-event dimension (e.g. `unverified_high_risk_action`)
+> graded by its own rubric, keeping the built-in `overrefusal`.
 
 > `stratify.dimensions` entries are `{name, description}`. Fold the parser's
 > `values` list into each dimension's `description` (e.g. "Values: variant A;
@@ -107,7 +116,11 @@ Fill from the candidate behavior (real schema field names):
 **Target shape:**
 - Framework agent (LangGraph, CrewAI, …) with a Python entry function →
   `pipeline.inference.target.callable` **with** `target.trace` (so the judge can
-  cite tool calls and routing).
+  cite tool calls and routing). **The callable MUST accept a `history` parameter**
+  (`def chat(message, history=None)`) — ASSERT detects multi-turn support by the
+  presence of that parameter, and a history-less callable silently receives only
+  the latest turn, breaking multi-turn scenario cases (prior verification/context
+  is dropped, inflating both the violation and `overrefusal` rates).
 - Hosted model + system prompt (+ optional tools) → `target.model` / `target.tools`.
 - Pre-collected traces → `assert-ai judge-traces --traces <path> --config <path>`.
 

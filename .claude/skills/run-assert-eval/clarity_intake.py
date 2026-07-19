@@ -55,6 +55,16 @@ _VARIANT_LEAD = re.compile(r"^\s*-\s+\*(?P<label>[^*:]+):\*", re.MULTILINE)
 # Italic bullet leads that are structural annotations, not test conditions.
 _CHAIN_NOISE = re.compile(r"^(?:Intervention point|Branch|Observation)\b", re.IGNORECASE)
 
+# --- Monolithic format ("## failure-NN — Title" sections in one failures.md) ---
+# A section header identifying one failure, e.g. "failure-01 — Identity-gate bypass".
+# Accepts em dash, en dash, or hyphen as the title separator.
+_MONO_HEADER = re.compile(r"^failure-(?P<num>\d+)\s*[\u2014\u2013-]\s*(?P<title>.+?)\s*$")
+# A bold lead block, e.g. "**Summary.**", "**Variants (elicitation_variant).**",
+# "**Severity: Critical**". Everything between the ``**`` markers is the lead.
+_MONO_BOLD_LEAD = re.compile(r"^\*\*(?P<lead>[^*\n]+?)\*\*\.?\s*", re.MULTILINE)
+# The dimension name a Variants block declares, e.g. "Variants (elicitation_variant)".
+_MONO_VARIANTS_DIM = re.compile(r"Variants\s*\((?P<dim>[^)]+)\)", re.IGNORECASE)
+
 
 @dataclass
 class CandidateBehavior:
@@ -294,12 +304,139 @@ def _slug_to_name(doc_path: str, title: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", title.lower()).strip("_") or "unnamed_behavior"
 
 
+def _split_mono_bold_blocks(body: str) -> list[tuple[str, str]]:
+    """Split a monolithic failure body into ``(lead, block_body)`` pairs.
+
+    Each block starts at a ``**Lead.**`` marker (Summary, Failure chain, Variants,
+    Interaction condition, Intervention points, Severity, ...) and runs until the
+    next such marker. Order is preserved.
+    """
+
+    blocks: list[tuple[str, str]] = []
+    matches = list(_MONO_BOLD_LEAD.finditer(body))
+    for idx, match in enumerate(matches):
+        start = match.end()
+        end = matches[idx + 1].start() if idx + 1 < len(matches) else len(body)
+        lead = match.group("lead").strip().rstrip(".").strip()
+        blocks.append((lead, body[start:end].strip()))
+    return blocks
+
+
+def _extract_mono_variants(block_body: str) -> list[str]:
+    """Pull the bullet list out of a monolithic ``**Variants (...).**`` block."""
+
+    variants: list[str] = []
+    for line in block_body.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("- "):
+            variants.append(stripped[2:].strip())
+        elif variants and not stripped:
+            continue
+        elif variants and not stripped.startswith("-"):
+            break
+    return [v for v in variants if v]
+
+
+def parse_monolithic_failures(text: str) -> list[CandidateBehavior]:
+    """Parse a single monolithic ``failures.md`` (``## failure-NN — Title`` sections).
+
+    This is the format the Clarity agent ships in this repo: one file, each failure
+    a ``## failure-NN — Title`` section with ``**Severity: X**``, ``**Summary.**``,
+    ``**Variants (<dim>).**`` bullets, ``**Interaction condition.**``, and
+    ``**Intervention points.**`` blocks. Returns one candidate per failure section.
+    Tolerant: missing fields degrade to warnings rather than raising.
+    """
+
+    sections = _split_sections(text)
+    candidates: list[CandidateBehavior] = []
+    for header, section_body in sections.items():
+        head = _MONO_HEADER.match(header.strip())
+        if not head:
+            continue  # e.g. "Priority summary" or other non-failure sections
+        title = head.group("title").strip()
+        warnings: list[str] = []
+
+        blocks = _split_mono_bold_blocks(section_body)
+        severity_raw: str | None = None
+        summary = ""
+        variants: list[str] = []
+        variant_dim = "elicitation_variant"
+        conditions: list[str] = []
+        for lead, block_body in blocks:
+            low = lead.lower()
+            if low.startswith("severity"):
+                # "Severity: Critical" -> take the text after the colon.
+                severity_raw = lead.split(":", 1)[1] if ":" in lead else block_body
+            elif low.startswith("summary"):
+                summary = block_body
+            elif low.startswith("variants"):
+                dim_match = _MONO_VARIANTS_DIM.search(lead)
+                if dim_match:
+                    variant_dim = dim_match.group("dim").strip()
+                variants = _extract_mono_variants(block_body)
+            elif low.startswith("interaction condition"):
+                if block_body:
+                    conditions.append(block_body.replace("\n", " ").strip())
+
+        severity, sev_warnings = normalize_severity(severity_raw)
+        warnings.extend(sev_warnings)
+        if not summary:
+            warnings.append("missing '**Summary.**' block")
+
+        dimensions: list[dict] = []
+        if variants:
+            dimensions.append(
+                {
+                    "name": variant_dim,
+                    "description": (
+                        "How the failure is elicited. Derived from the Clarity "
+                        "failure's Variants list; each value is a distinct route "
+                        "to the same failure."
+                    ),
+                    "values": variants,
+                }
+            )
+        else:
+            warnings.append(
+                "no variants found; stratify dimensions must be authored manually"
+            )
+        if len(conditions) > 1:
+            dimensions.append(
+                {
+                    "name": "interaction_condition",
+                    "description": (
+                        "Conditions under which the failure manifests, mined from "
+                        "the failure's Interaction condition block."
+                    ),
+                    "values": conditions,
+                }
+            )
+
+        source = f"failures.md#failure-{head.group('num')}"
+        name = re.sub(r"[^a-z0-9]+", "_", title.lower()).strip("_") or "unnamed_behavior"
+        candidates.append(
+            CandidateBehavior(
+                name=name,
+                description=summary or title,
+                severity=severity,
+                priority=severity_to_priority(severity),
+                source_doc=source,
+                candidate_dimensions=dimensions,
+                warnings=warnings,
+            )
+        )
+    return candidates
+
+
 def build_candidate_behaviors(protocol_dir: str | Path) -> list[CandidateBehavior]:
     """Read a ``.clarity-protocol`` directory and build candidate behaviors.
 
     ``protocol_dir`` may point at the ``.clarity-protocol`` directory itself, its
-    ``failures/`` subdirectory, or the project root. Missing individual docs are
-    tolerated: the index entry still yields a candidate, flagged with a warning.
+    ``failures/`` subdirectory, or the project root. Two ``failures.md`` layouts
+    are supported: an *index* format (numbered links to per-failure ``failure-NN-*.md``
+    docs) and a *monolithic* format (one file with ``## failure-NN — Title``
+    sections). Missing individual docs are tolerated: the index entry still yields a
+    candidate, flagged with a warning.
     """
 
     failures_dir = _resolve_failures_dir(protocol_dir)
@@ -307,7 +444,13 @@ def build_candidate_behaviors(protocol_dir: str | Path) -> list[CandidateBehavio
     if not index_path.is_file():
         raise FileNotFoundError(f"no failures.md under {failures_dir}")
 
-    entries = parse_failures_index(index_path.read_text(encoding="utf-8"))
+    text = index_path.read_text(encoding="utf-8")
+    entries = parse_failures_index(text)
+    if not entries:
+        # No index links -> assume the monolithic single-file format.
+        candidates = parse_monolithic_failures(text)
+        candidates.sort(key=lambda c: (_priority_sort_key(c.priority), c.name))
+        return candidates
     candidates: list[CandidateBehavior] = []
     for entry in entries:
         warnings = list(entry["warnings"])
