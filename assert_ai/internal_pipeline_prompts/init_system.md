@@ -276,6 +276,10 @@ test_set:
     # model: ...                # optional — uncomment to override default_model
 ```
 
+Sampling defaults to `pairwise`. `stratified` accepts `stratify_by`,
+`full_factorial` accepts `replication: balanced|none`, and `random` accepts
+`with_replacement: true|false`.
+
 ## pipeline.inference
 
 Runs the target system against test cases.
