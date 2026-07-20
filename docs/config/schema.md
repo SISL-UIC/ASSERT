@@ -146,8 +146,8 @@ At least one of `prompt` or `scenario` is required. The fallback order for promp
 
 Sampling methods:
 
-- `pairwise` — default. Uses an IPOG covering array; full pair coverage requires a budget at least as large as the covering array.
-- `stratified` — balances across `stratify_by` (default `[behavior]`) and samples remaining dimensions uniformly.
+- `pairwise` — default. Uses an IPOG covering array; full pair coverage requires a budget at least as large as the covering array. Budgets above the covering-array size replicate its complete assignments as evenly as possible; they do not add new assignment cells.
+- `stratified` — balances across the joint Cartesian product of `stratify_by` (default `[behavior]`) and samples remaining dimensions uniformly. When the budget is smaller than the number of joint strata, it samples distinct joint strata uniformly; individual axes are not guaranteed to be marginally balanced.
 - `full_factorial` — covers every dimension cell. `replication` is `balanced` by default or `none` when `sample_size` must exactly equal the factorial size.
 - `random` — uniform random assignments. `with_replacement` defaults to `true`.
 

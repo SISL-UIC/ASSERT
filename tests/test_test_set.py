@@ -225,7 +225,12 @@ class SamplingMethodsTest(unittest.TestCase):
             },
             rng=random.Random(7),
         )
-        self.assertEqual(len(assignments or []), 3)
+        rows = assignments or []
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(
+            len({tuple(row[axis] for axis in stratification) for row in rows}),
+            3,
+        )
 
     def test_full_factorial_covers_every_cell(self) -> None:
         stratification = _make_stratification_with_behavior(2)
@@ -560,6 +565,27 @@ class BuildGenerationJobsTest(unittest.TestCase):
         counts = [job.count for job in jobs]
         self.assertEqual(counts.count(3), 3)
         self.assertEqual(counts.count(2), num_tuples - 3)
+
+    def test_pairwise_budget_above_array_size_replicates_fixed_assignments(self) -> None:
+        taxonomy = _make_policy()
+        stratification = _make_stratification_with_behavior(2)
+        ca = build_covering_array(
+            stratification,
+            random.Random(42),
+            axes=("behavior",) + FACTOR_NAMES,
+        )
+        _, assignments = build_generation_jobs(
+            taxonomy=taxonomy,
+            stratification=stratification,
+            sample_size=len(ca) * 2,
+            rng=random.Random(42),
+        )
+        assignment_counts: dict[tuple[tuple[str, str], ...], int] = {}
+        for row in assignments or []:
+            key = tuple(sorted(row.items()))
+            assignment_counts[key] = assignment_counts.get(key, 0) + 1
+        self.assertEqual(len(assignment_counts), len(ca))
+        self.assertEqual(set(assignment_counts.values()), {2})
 
     def test_generation_jobs_sample_size_smaller_than_array(self) -> None:
         """When sample_size < covering array, some tuples get 0 and are skipped."""

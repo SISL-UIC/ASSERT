@@ -1186,21 +1186,18 @@ async def run_test_set(
     covered_categories = {row_behavior(r) for r in all_records} - {""}
     missing_categories = all_categories - covered_categories
     if missing_categories:
-        # With stratification dimensions the covering array has more tuples
-        # than categories.  The minimum sample_size per kind that guarantees
-        # every category appears at least once equals the number of
-        # categories (no extra dimensions) or more (with extra dimensions).
-        min_per_kind = len(all_categories)
         log.warning(
             "Test cases cover only %d of %d behavior categories. "
             "Missing categories: %s. "
-            "To cover all categories, set sample_size >= %d per kind "
-            "(prompt / scenario). With additional stratification dimensions "
-            "the required minimum may be higher.",
+            "Coverage depends on the sampling method and successful generation: "
+            "pairwise requires a budget at least as large as the covering array; "
+            "stratified guarantees behavior coverage when stratify_by=[behavior] "
+            "and sample_size >= %d; full_factorial covers every assignment; "
+            "random does not guarantee category coverage.",
             len(covered_categories),
             len(all_categories),
             ", ".join(sorted(missing_categories)),
-            min_per_kind,
+            len(all_categories),
         )
     # -------------------------------------------------------------------------
 
