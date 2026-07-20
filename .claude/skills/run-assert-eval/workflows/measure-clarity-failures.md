@@ -95,8 +95,8 @@ Fill from the candidate behavior (real schema field names):
 | `behavior.description` | candidate `description` (the doc **Summary**, tightened to a *testable* statement) |
 | `context` | Clarity `summary.md` / `goal/requirements.md` / `solution/architecture.md` |
 | `pipeline.test_set.stratify.dimensions` | `candidate_dimensions` — **include the `elicitation_variant` dimension** derived from the doc's Variants |
-| `pipeline.test_set.prompt.sample_size` | **noise-aware — see the sizing note below** (small e.g. 10 only for a throwaway first look; **≥25 if a stable rate matters**) |
-| `pipeline.test_set.scenario.sample_size` | same — **≥25 when the run will feed an ACS before/after A/B** (see `govern-and-remeasure.md`) |
+| `pipeline.test_set.prompt.sample_size` | **ask the user (see the sizing note below)** — do not pick silently; recommend `25` (or `≥25` for an ACS A/B), offer `10` for a throwaway first look |
+| `pipeline.test_set.scenario.sample_size` | same — ask once and apply the user's answer to **both** `prompt` and `scenario` unless they say otherwise (`≥25` when the run will feed an ACS before/after A/B — see `govern-and-remeasure.md`) |
 | `pipeline.inference.target` | the target shape (see below) |
 | `pipeline.judge.preset` + `dimensions` | keep the violation metric **and** `overrefusal` as **separate** dimensions (see the coupling note below) |
 
@@ -116,11 +116,16 @@ Fill from the candidate behavior (real schema field names):
 > config drift by a case or two purely by chance. That noise is harmless for a quick
 > "is it broken?" look, but it **wrecks an ACS before/after A/B**: a phantom ±10pp
 > swing on a small sample can masquerade as a governance effect (or hide one).
-> Guidance: use `10` only for a throwaway first pass you don't intend to compare;
-> use **`sample_size: 25` or more** the moment a stable rate matters — and always
-> for a run that will become an A/B baseline, because the governed config is a
-> byte-identical copy that inherits this size (see `govern-and-remeasure.md`).
-> Cost scales linearly with sample size, so weigh speed vs. a trustworthy delta.
+>
+> **Always ask the user for the sample size before generating the config — do not
+> pick it silently.** Present the tradeoff in one line and let them choose, e.g.:
+> *"How many cases per behavior should I sample? `10` = fast/noisy first look,
+> `25` = stable rate (recommended), `50`+ = tightest signal. Cost scales linearly.
+> I'll use the same size for prompt and scenario."* Recommend `25` as the default,
+> and **`≥25` whenever the run will become an ACS A/B baseline** (the governed
+> config is a byte-identical copy that inherits this size — see
+> `govern-and-remeasure.md`). If the user has no preference, default to `25` (or
+> their first-look `10` only if they explicitly want a throwaway pass).
 > (`examples/incident_triage_agent`, the repo's reference governance A/B, ran at
 > `sample_size: 200`.)
 
@@ -213,12 +218,13 @@ failure mode now has a **measured baseline** and where the eval lives
    wrong calibration, happy-path attachment, cultural aversion, verbosity, unused
    protocol, alert fatigue).
 3. Triage: user picks **P1s only** → just `user_disengagement`.
-4. Generate `evals/user-disengagement/eval_config.yaml`: `behavior.description`
+4. **Ask the user for `sample_size`** (recommend `25`; `10` = quick look, `50`+ = tightest). Say they pick `25`.
+5. Generate `evals/user-disengagement/eval_config.yaml`: `behavior.description`
    from the doc Summary, `stratify.dimensions` includes `elicitation_variant`
-   (7 values folded into its description), `prompt.sample_size: 10` (a fast first
-   pass — bump to ≥25 for a stable rate or an ACS A/B),
+   (7 values folded into its description), `prompt.sample_size: 25` (the size the
+   user chose, applied to `scenario` too),
    `judge.dimensions` = `policy_violation` + `overrefusal`.
-5. Confirm → `assert-ai run` → results table: one `user_disengagement` column,
+6. Confirm → `assert-ai run` → results table: one `user_disengagement` column,
    `policy_violation` X% and `overrefusal` Y%, 3–5 cited examples.
-6. Offer `record_suggestion` back to Clarity: "user_disengagement now has a
+7. Offer `record_suggestion` back to Clarity: "user_disengagement now has a
    measured baseline at evals/user-disengagement/."

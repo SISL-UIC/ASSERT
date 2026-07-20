@@ -48,8 +48,9 @@ in this workflow is specific to billing.
    the governed run (byte-identical config), the whole A/B inherits its
    `sample_size`. At `sample_size: 10` one flipped case is ±10pp of noise that can
    masquerade as — or bury — the governance effect. If the baseline was a quick
-   first pass at `10`, **raise `sample_size` to ≥25 in the baseline config and
-   re-run it before comparing** (see the sizing note in `measure-clarity-failures.md`).
+   first pass at `10`, **ask the user to confirm a larger size (recommend `≥25`),
+   then raise `sample_size` in the baseline config and re-run it before comparing**
+   (see the sizing note in `measure-clarity-failures.md`).
 2. **The ACS extra is installed**: `python -m pip install -e ".[acs]"` (pulls in
    the `agent-control-specification` SDK). Verify with `assert-ai acs --help`.
 3. **`opa` is on PATH** (Open Policy Agent) — required to evaluate the generated
@@ -212,11 +213,37 @@ pre_tool_call_verdict := {"decision": "deny", "reason": "<violation-dim>"} if {
     requested != ""
     requested != input.policy_target.value.caller_account_id   # injected, trusted
 }
+
+# Shape 3 — NUMERIC / THRESHOLD gate. Deny when a numeric arg exceeds a TRUSTED
+# cap the agent injects (never a user-supplied limit). The `is_number` guard is
+# required: a bare `>` errors or misfires when the field is a string or absent, so
+# an unguarded rule silently no-fires (bypass persists). Compare against the
+# injected cap, not a constant, so one policy serves callers with different caps.
+pre_tool_call_verdict := {"decision": "deny", "reason": "<violation-dim>"} if {
+    input.intervention_point == "pre_tool_call"
+    input.tool.name in guarded_tools
+    amount := input.policy_target.value.amount
+    is_number(amount)
+    amount > input.policy_target.value.max_amount   # injected, trusted cap
+}
 ```
 
 Pair each `pre_tool_call` rule with a matching `post_tool_call` rule (defense in
 depth on the result), and declare **both** intervention points in the manifest —
 a guarded tool that declares only one fails closed to `deny`.
+
+> **Boundary — ACS evaluates each tool call in isolation.** A Rego rule sees only
+> the current call's `input` (args/result, tool name, annotations, constants); it
+> cannot read conversation history or prior calls. So a constraint that spans
+> multiple calls — a running total ("refunds across the session must stay under
+> $200"), an ordering rule ("must call `verify` before `issue_refund`"), or a
+> per-session rate limit — **cannot** be expressed in the generated Rego. Do not
+> fake it by inventing a history field (it will always be empty → the gate
+> no-fires). The supported pattern is the same agent-side injection used above:
+> track the running total / prior-call flag in the agent's **session state**, inject
+> the resulting scalar into the policy_target (e.g. `refunded_total_so_far`), and
+> gate on it with a per-call Shape 1 or Shape 3 rule. The billing reference already
+> keeps `state["refunded_total"]` for exactly this.
 
 **If you are unsure of the exact input shape**, capture it once instead of
 guessing: build the control from the manifest, evaluate one known-bad example

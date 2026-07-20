@@ -70,10 +70,11 @@ python -m pytest .claude/skills/run-assert-eval/tests/test_clarity_intake.py
    of 7 variants.
 3. **Triage gate**: the skill lists candidates P1→P3 and asks which to measure. User
    picks **"P1s only"** → just `user_disengagement`.
-4. The skill generates `evals/user-disengagement/eval_config.yaml`:
+4. The skill **asks the user for `sample_size`** (recommends `25`; `10` = quick
+   look, `50`+ = tightest), then generates `evals/user-disengagement/eval_config.yaml`:
    `behavior.description` from the doc Summary, `test_set.stratify.dimensions`
-   includes `elicitation_variant`, `test_set.prompt.sample_size: 10` (a fast first
-   pass — bump to ≥25 for a stable rate or an ACS A/B),
+   includes `elicitation_variant`, `test_set.prompt.sample_size` set to the user's
+   choice (same for `scenario`),
    `judge.dimensions` = `policy_violation` + `overrefusal`.
 5. **Confirm** → `assert-ai run` → results table: one `user_disengagement` column,
    `policy_violation` X% and `overrefusal` Y% (reported separately), 3–5 cited cases.
