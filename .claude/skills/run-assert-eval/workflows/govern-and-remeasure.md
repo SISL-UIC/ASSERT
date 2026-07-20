@@ -245,6 +245,72 @@ a guarded tool that declares only one fails closed to `deny`.
 > gate on it with a per-call Shape 1 or Shape 3 rule. The billing reference already
 > keeps `state["refunded_total"]` for exactly this.
 
+### Semantic gates — the `output` and `input` points (annotator-based)
+
+The two tool points above are **structural** (decidable from args/results). The other
+two points `acs generate` can emit — `output` (the assistant's own free-form text)
+and `input` (inbound user text, e.g. a prompt-injection attempt) — carry **no
+structural field to key on**, so their rules condition on an **LLM/classifier
+annotator** instead of `input.policy_target.value`. The ACS host runs the annotator
+at runtime and exposes its result at `input.annotations.<name>`.
+
+```rego
+default output_verdict := {"decision": "allow"}
+default input_verdict := {"decision": "allow"}
+
+# Shape 4 — SEMANTIC OUTPUT gate. Deny when an annotator judges the assistant's
+# text to be an instance of the failure class (leak, unsafe advice, a verbal
+# high-risk promise the pre_tool_call gate can't see). An `llm` annotator returns a
+# bool at `input.annotations.<name>`; a `classifier` annotator exposes labels at
+# `input.annotations.<name>.<label>`. `== true` fails OPEN when the annotator didn't
+# run (allow), which is the right default for a semantic gate.
+output_verdict := {"decision": "deny", "reason": "<violation-dim>"} if {
+    input.intervention_point == "output"
+    input.annotations.<output_annotator> == true
+}
+
+# Shape 5 — SEMANTIC INPUT gate. Same shape at the inbound point: deny a user turn
+# an annotator flags (jailbreak / injection / disallowed request) before the agent
+# acts on it. Use this only for a genuinely inbound-content failure — a tool-gate
+# failure belongs at pre_tool_call, not here.
+input_verdict := {"decision": "deny", "reason": "<violation-dim>"} if {
+    input.intervention_point == "input"
+    input.annotations.<input_annotator> == true
+}
+```
+
+Unlike the tool shapes, a semantic gate needs the annotator **wired in the
+manifest** — both the per-point `annotations:` mapping and a top-level `annotators:`
+declaration (the generator emits both; keep them when you commit):
+
+```yaml
+intervention_points:
+  output:
+    policy_target: $.output
+    policy_target_kind: assistant_output          # `$.input` / `user_input` for the input point
+    policy:
+      id: <slug>
+      query: data.agent_control_specification.<slug>.output_verdict
+    annotations:
+      <output_annotator>:
+        from: $policy_target                      # feed the assistant text to the annotator
+annotators:
+  <output_annotator>:
+    type: llm                                      # or `classifier` (then gate on `.<label>`)
+```
+
+**Review notes specific to semantic gates:**
+- **`validate` can't test these.** Offline `assert-ai acs validate` runs no annotator,
+  so `input.annotations.*` is empty and a Shape 4/5 rule shows `handled 0/N` — that is
+  **expected, not a defect** (see Step 3). Prove a semantic gate only by the guarded
+  **remeasure delta** (Step 4/5), where the ACS host runs the annotator.
+- **Keep the annotator general.** Its prompt/labels must catch paraphrases of the
+  failure class, not one literal wording — otherwise it over- or under-fires and moves
+  `overrefusal`.
+- **`output` is the fix for a "verbal-only" residual.** A `pre_tool_call` gate cannot
+  block an agent that merely *promises* a high-risk action in prose without calling the
+  tool; add a Shape 4 `output` gate to catch that (see the worked example, Step 5).
+
 **If you are unsure of the exact input shape**, capture it once instead of
 guessing: build the control from the manifest, evaluate one known-bad example
 through `NativeRuntimeClient`, and print the result's `policy_input` — that is
