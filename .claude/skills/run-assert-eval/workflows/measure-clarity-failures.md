@@ -32,6 +32,13 @@ or failures for their agent, model, or app.
      `clarity embed`, reload MCP servers, confirm `run_clarity` is callable. Do
      **not** substitute a plain-language risk guess — that produces low-signal evals.
 
+> **Switching domains?** `.clarity-protocol/` is a single, non-namespaced scratch
+> directory — a fresh discovery run **overwrites** the prior domain's `failures/`,
+> `goal/`, and `solution/`. Before starting discovery for a *different* agent/domain,
+> archive the existing one to `archive/<prev-domain>/clarity-protocol/` (and move its
+> `artifacts/{acs,results}/<prev-domain>-*` suites to `archive/<prev-domain>/artifacts/`).
+> Clarity re-scaffolds a clean `.clarity-protocol/` on the next `run_clarity`.
+
 ## Step 1 — Parse
 
 Run the intake parser (`clarity_intake.py`) on the protocol directory:
