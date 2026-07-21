@@ -489,6 +489,16 @@ function buildJudgedSampleRow(
 		judge_status:
 			typeof scoreRow.judge_status === 'string' ? (scoreRow.judge_status as JudgeStatus) : null,
 		judge_error: typeof scoreRow.judge_error === 'string' ? scoreRow.judge_error : null,
+		score_keys:
+			Array.isArray(scoreRow.score_keys) &&
+			scoreRow.score_keys.every((key) => typeof key === 'string')
+				? (scoreRow.score_keys as string[])
+				: null,
+		not_applicable_score_keys:
+			Array.isArray(scoreRow.not_applicable_score_keys) &&
+			scoreRow.not_applicable_score_keys.every((key) => typeof key === 'string')
+				? (scoreRow.not_applicable_score_keys as string[])
+				: null,
 		messages,
 		llm_calls: readLlmCalls(transcriptRow?.llm_calls),
 		target_runtime_mode: runtimeMode,
