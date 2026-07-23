@@ -143,8 +143,8 @@ def _build_llm() -> BaseChatModel:
     base = os.environ["AZURE_API_BASE"]
     key = os.environ.get("AZURE_API_KEY") or ""
 
-    # Entra/AAD path: when ASSERT_AZURE_USE_AAD=1 (a key-auth-disabled resource
-    # such as qualityevalswc), authenticate the SUT with an az-login bearer-token
+    # Entra/AAD path: when ASSERT_AZURE_USE_AAD=1 (a key-auth-disabled resource),
+    # authenticate the SUT with an az-login bearer-token
     # provider instead of a static key. The provider auto-refreshes, so long runs
     # do not hit token expiry. aad_auth lives next to this module.
     try:

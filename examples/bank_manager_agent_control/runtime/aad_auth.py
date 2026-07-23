@@ -1,4 +1,4 @@
-"""Shared Entra/AAD auth for the key-auth-disabled Foundry endpoint (zava-foundry).
+"""Shared Entra/AAD auth for a key-auth-disabled Foundry endpoint.
 
 Activated when ``ASSERT_AZURE_USE_AAD=1``. Mints bearer tokens through
 ``az login`` (AzureCliCredential), so the SUT agent (LangChain), the B2 grounding

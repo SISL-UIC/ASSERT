@@ -63,7 +63,7 @@ def _cfg() -> dict:
 
 
 def _aoai_resource_uri(v1_base: str) -> str:
-    # https://zava-foundry.openai.azure.com/openai/v1 -> https://zava-foundry.openai.azure.com
+    # https://your-foundry-resource.openai.azure.com/openai/v1 -> https://your-foundry-resource.openai.azure.com
     m = re.match(r"(https://[^/]+)", v1_base or "")
     return m.group(1) if m else ""
 
