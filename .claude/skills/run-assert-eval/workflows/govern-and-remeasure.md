@@ -477,6 +477,24 @@ both required: (1) tighten the annotator so it fires on **every** offending turn
 confirm the callable declares a `history` param and the guarded wrapper gates
 **each** turn's output — otherwise only the last turn is protected.
 
+**If a grounding/faithfulness annotator over-blocks MULTI-TURN scenarios (high
+`overrefusal` on scenarios, ~flat on single-turn prompts)** → the gate is grounding
+each turn against **only that turn's tool results**, so specifics the user supplied
+earlier — or that an earlier turn's tool returned — look "unsupported" on a
+follow-up turn with no new tool call, and get blocked. Two fixes, both required:
+(1) feed the annotator (and the regenerate step) the **conversation `history`** and
+treat user-supplied + prior-turn facts as valid grounding, not just this turn's
+tool context; and (2) **prefer `regen` over a flat-decline (`blunt`) fallback** — in
+blunt mode every block returns the canned decline, which the judge scores as
+overrefusal, so the history fix barely moves the needle. Regen re-answers grounded
+in the conversation + tool results and RE-GATEs, recovering the legitimate turns.
+(Observed live on travel `fabricated-details`, `azure/gpt-5.4-mini` strict
+annotator, n=25/type: the history-grounding fix alone in blunt mode moved scenario
+overrefusal 92%→84%; switching to **regen** took it 84%→**48%** while scenario
+`fabricated_details` went baseline 76%→36% — a real drop with overrefusal only
+moderately up, vs blunt's 76%→4-16% bought at a catastrophic 84-92% overrefusal.
+Regen is the balanced operating point; blunt just trades one failure for another.)
+
 **If `overrefusal` rows turn out to be the baseline agent's own refusals (the
 gate never fired on them)** → they are not ACS-caused; record them as baseline
 noise in the ledger rather than loosening the policy.
