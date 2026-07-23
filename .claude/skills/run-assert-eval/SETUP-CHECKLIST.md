@@ -37,7 +37,7 @@ once per workspace, then the `run-assert-eval` skill's discovery front door
       is `python -m clarity_agent.mcp` with no absolute path and could be committed —
       but the default uv-checkout form must stay local.)
 
-## Phase 5 — End-to-end verification (definition of done)
+## Phase 2 — End-to-end verification (definition of done)
 
 - [ ] **Fresh discovery**: with no `.clarity-protocol/failures/failures.md`, call
       `run_clarity`, conduct a short clarifying conversation, and confirm
@@ -71,4 +71,7 @@ once per workspace, then the `run-assert-eval` skill's discovery front door
   describes a *system-under-test*, not this framework — it's per-target runtime
   output. In **your own product's repo**, the protocol describes your product, so
   prefer committing the durable docs (`goal/`, `solution/`, `failures/`) and
-  ignoring only `transcripts/` (and optionally `mailboxes/`, `archive/`).
+  ignoring only `transcripts/` (and optionally `mailboxes/`). When you finish a
+  domain here, move its protocol into `examples/<domain>/Clarity Protocol/` so it is
+  preserved alongside that domain's `evals/` and `acs/` (see the per-example
+  replication package in `SKILL.md`).

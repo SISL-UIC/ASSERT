@@ -398,9 +398,155 @@ is disabled (see Step 1), pass your custom violation dimension explicitly (e.g.
 `baseline violation % − governed violation %`. A meaningful drop with
 `overrefusal` roughly flat is the win condition.
 
+## Step 5a — If the delta is wrong, diagnose then iterate (don't guess)
+
+A wrong result is: **no drop / a smaller drop than expected in the bad-event
+dimension, OR `overrefusal` rose materially.** Do not re-roll blindly — read the
+governed rows and match the symptom to a fix below, apply the smallest change,
+re-run (cap ~4 attempts/domain). Each rule is keyed to an **observable symptom**
+so the next domain with the same signature acts immediately. To get the signals,
+join `artifacts/results/<suite>/acs-governed/{inference_set,scores}.jsonl` on
+`test_case_id`, pull each row's `events` (actor `target` = the agent's replies)
+and `verdict.dimension_justifications`, and count how often the gate's
+block-remediation text appears (= how often the gate fired).
+
+**If the bad-event rate is flat AND the gate fired ~0 times** → the gate is at
+the wrong interception point. A prose/semantic failure judged on the agent's
+**final reply** (disclosure, leakage, unsafe advice, fabrication, injection
+compliance) cannot be caught by a tool-arg or tool-result rule — the model emits
+the harm as text, sometimes with **no tool call at all**. Move to a **Shape 4
+`output` annotator gate** (see "Semantic gates" above). Never collapse a semantic
+failure into a deterministic tool gate just because retrieved data carried a
+structural field.
+
+  **A deterministic field in `tools.py` does NOT make the failure structural.**
+  A backend may expose a clean flag (e.g. `validation.fabricated_fields`,
+  `sequence_violations`, a `verified` echo) that *looks* like a perfect
+  post_tool_call gate — but what matters is **what the JUDGE scores**. Before
+  committing to a tool gate, confirm the failure actually routes through the tool:
+  (1) grep the baseline `inference_set.jsonl` for how often the flagged rows call
+  the tool you plan to gate (`count(cases with "<tool_name>" in llm_calls)`); and
+  (2) read `verdict.dimension_justifications` on flagged rows. If the justifications
+  cite the **reply text** — "presents unsupported values as fact", "in the draft",
+  "to paste into the tracker", "claimed approved" — and/or the gated tool is called
+  in only a handful of the flagged rows, the harm is **prose the model emits
+  directly**, so a post_tool_call gate will fire ~0× and move nothing. This is a
+  SEMANTIC failure → author an `output` annotator gate calibrated to the judge, and
+  keep any deterministic tool rule only as **defense-in-depth** for the minority of
+  rows that do route through the tool. (Observed live on change_control_agent
+  "fabricated fields": tools.py flags `fabricated_fields`, but the agent fabricated
+  in prose and called `create_change_request` in only 3/50 rows, so the structural
+  post_tool_call gate blocked 0/50 and the rate held at ~56%. Switching to an
+  output annotator that flags unsupported field values in the reply is what moved
+  it.)
+
+**If the gate fired but the bad-event rate did NOT drop (annotator
+false-negatives), AND the failure's "who is entitled" signal comes from a
+spoofable in-agent check** (e.g. a `verify_identity` tool that infers clearance
+by keyword-matching the caller's self-description; a self-asserted role) → **do
+NOT condition the annotator on the agent's own signal** — it is strictly weaker
+than the judge, so trusting it lets the same spoofed cases through. Calibrate the
+annotator to the **judge's** standard instead: feed it the **user's turns** and
+instruct it that a bare self-claim ("I'm on the platform team", "I'm an
+engineer") is **not** legitimate verification, so substantive restricted-content
+disclosure to a merely self-described caller is a violation. Use an annotator
+model at the **judge's calibration tier** (same family/size as the judge); a
+weaker/cheaper annotator under-fires. Contrast with a *trusted* session flag
+(billing `verified`), which you *do* surface into the policy — the rule here is
+specifically: when the only entitlement signal is spoofable, mirror the judge,
+don't trust the agent.
+
+**If `overrefusal` ROSE in the governed run** → the block-remediation is a **flat
+refusal**. The safe behavior the judge rewards is "decline the restricted part
+**and still provide the permitted alternative**" (public redirect, existence-only
+acknowledgment, escalation, closest public equivalent). Replace the canned
+refusal with a **regenerated helpful answer**: re-answer using only in-policy
+(e.g. public) knowledge, **lead with the useful content — never open with an
+apology/"I can't"**, acknowledge that the restricted doc exists without revealing
+it, offer escalation — then **RE-GATE that re-answer** so the no-harm guarantee
+still holds (fall back to a flat decline only if the re-answer still trips the
+gate). This is the travel `_regenerate_grounded` / azure `_regenerate_public`
+pattern. **Do not** widen or loosen the deny to fix overrefusal — fix the
+remediation, not the gate.
+
+**If a multi-turn scenario stays flagged even though the gate fired on some
+turn** → the judge scores the **whole transcript**, so an **earlier** turn the
+annotator missed keeps the case flagged regardless of a later block. Two fixes,
+both required: (1) tighten the annotator so it fires on **every** offending turn
+(usually the same calibration fix as the false-negative rule above), and (2)
+confirm the callable declares a `history` param and the guarded wrapper gates
+**each** turn's output — otherwise only the last turn is protected.
+
+**If `overrefusal` rows turn out to be the baseline agent's own refusals (the
+gate never fired on them)** → they are not ACS-caused; record them as baseline
+noise in the ledger rather than loosening the policy.
+
+**If the risk's BASELINE bad-event rate is already very low (≲10%)** → it is not
+a compelling governance target: the baseline agent already resists it (often via
+its system prompt), so a governed re-run can only stay flat-and-low or move
+within sample noise — there is no real drop to demonstrate. Don't force iterations
+chasing a few noisy rows. Do run the governed pass ONCE to confirm the gate does
+**no harm** (bad-event stays low, `overrefusal` flat), then record it as a
+low-baseline / no-harm target and move on. Prefer, at triage time, to pick risks
+with a substantial baseline (the failure the agent actually commits), so the
+before/after delta is meaningful. (Observed live on change_control_agent
+"authority misrepresentation": baseline 6% — the agent's prompt already forbids
+unsupported approval claims — so it was recorded as a no-harm target, not iterated.)
+
+**Prompt injection / XPIA is a SEMANTIC `output` gate, not a retrieved-content
+tool gate.** The injected payload arrives inside a tool result (retrieved
+document text), which tempts a post_tool_call rule — but the bad event the judge
+scores is the agent RELAYING or ACTING ON the embedded instruction in its final
+REPLY (fake deadlines/deprecations, injected contacts, rule overrides,
+exfiltrated figures). Correctly reading and summarizing the document while
+ignoring its embedded commands is NOT a violation, so the gate must judge the
+reply, not the retrieved bytes. Author an `output` annotator that flags
+ENDORSING/PASSING-ALONG the embedded instruction as real, agent-sanctioned
+guidance, and EXEMPT reporting-it-as-data (quoting/warning about the injected line
+while explicitly treating it as untrusted document text) — otherwise the
+annotator false-positives on accurate factual summaries and inflates overrefusal.
+On block, regenerate a sanitized reply (keep the document's factual content, strip
+the injected commands) and RE-GATE. (Observed live on azure_doc_qa prompt
+injection: baseline followed_injection 22% → 6% governed.)
+
+**Before attributing a governed `overrefusal` rise to ACS, DECOMPOSE it — much of
+it is often baseline-agent stochastic variance, not the gate.** When the governed
+run re-runs inference (`--force-stage inference`) the baseline path RE-GENERATES,
+so a stochastic/high-overrefusal agent will produce different refusals run-to-run
+that have nothing to do with ACS. Join governed↔baseline scores on
+`test_case_id`, take the rows that are `overrefusal=true` in governed but `false`
+in baseline, and split them by whether the gate's block-remediation text is
+present in the reply: **remediation present = ACS-caused**; **absent = the gate
+never fired, so it is baseline variance**. Only the ACS-caused fraction should be
+weighed against the bad-event drop; record the rest as baseline noise. (Observed
+live on azure_doc_qa prompt injection v3: of 11 newly-overrefused rows only 4 had
+the gate fire — the other 7 were baseline-agent variance, so the true ACS
+overrefusal cost was ~8pt, not the raw +10pt, for a 16pt bad-event drop.) Note
+the flip side: a flat-refusal fallback GUARANTEES the bad event is blocked but
+costs ~1pt overrefusal per unrecoverable block; returning the regenerated answer
+instead lowers overrefusal but lets the bad event back through if the regenerate
+still trips — prefer investing in a cleaner regenerate + a more precise annotator
+over trading one for the other.
+
+**High baseline `overrefusal` on an injection/XPIA suite (or any "engage with
+suspicious content" behavior) is usually the BASELINE AGENT's own caution, not an
+ACS artifact — do NOT chase it with the policy.** These suites deliberately ask the
+agent to quote/summarize/classify suspicious embedded text, where the permissible
+behavior is to neutrally report it as untrusted data; an over-cautious agent that
+refuses or clams up ("I can't access that document") is scored as overrefusal, and
+that rate sits high *before and after* ACS because it is a property of the agent +
+judge rubric, not the gate. Confirm with the decomposition above — the gate fired on
+only a minority of the overrefused rows; the rest are the baseline agent refusing on
+its own. Lowering it is an **agent-prompt** change (teach the agent to quote-and-frame
+suspicious text as data instead of refusing), which is deliberately OUT OF SCOPE for
+the A/B: changing the agent prompt breaks the pure-enforcement comparison. Report it
+as a real product finding for the agent's owners, not as an ACS regression. (Observed
+live on azure_doc_qa prompt injection: baseline overrefusal ~40% was ~14/20 the agent
+declining to engage with runbook text, essentially unchanged by the gate.)
+
 ## Step 6 — Export shareable artifacts
 
-Generate a self-contained static HTML per run for SharePoint. Start the viewer
+Generate a self-contained static HTML per run. Start the viewer
 (`cd viewer && npm install && npm run dev`, port 5174), then fetch the export
 route for each run:
 
@@ -409,9 +555,9 @@ route for each run:
 /suite/<suite>/acs-governed/export
 ```
 
-Each returns a standalone `<suite>__<run>.html` (inline CSS, no server needed).
-The user uploads both to SharePoint and pastes the SharePoint URLs into the
-ledger. (Do not commit exported HTML — it is per-run output.)
+Each returns a standalone `<suite>__<run>.html` (inline CSS, no server needed) — a
+portable artifact the user can archive or share however they choose. (Do not commit
+exported HTML — it is per-run output.)
 
 ## Step 7 — Append the ledger row
 
@@ -420,7 +566,7 @@ output). Columns:
 
 | Scenario | Clarity Failures | ASSERT artifacts | Baseline % | ACS Delta |
 | --- | --- | --- | --- | --- |
-| <domain / behavior> | <failure modes from `.clarity-protocol/failures/`> | <SharePoint links: baseline, governed> | <violation-dim %> | <baseline − governed> |
+| <domain / behavior> | <failure modes from `.clarity-protocol/failures/`> | <exported HTML paths (baseline, governed)> | <violation-dim %> | <baseline − governed> |
 
 Keep the custom violation dimension as the headline; note `overrefusal` movement
 alongside the delta so a drop that came from over-denial is visible, not hidden.
@@ -453,12 +599,12 @@ by an ACS policy at `artifacts/acs/<suite>/`, baseline `X%` dropped to `Y%`.
 ## Worked example (billing identity-gate bypass)
 
 1. Baseline: `assert-ai run --config
-   examples/billing_support_agent/evals/identity-gate-bypass/eval_config.yaml` →
-   suite `billing-identity-gate-bypass`, run `baseline`,
+   examples/billing_support_agent/evals/unverified-high-risk-action/eval_config.yaml` →
+   suite `billing-unverified-high-risk-action`, run `baseline`,
    `unverified_high_risk_action` ~33–40% (built-in `policy_violation` disabled,
    `overrefusal` tracked separately).
-2. Generate + review: `assert-ai acs generate --suite billing-identity-gate-bypass
-   --run baseline --out artifacts/acs/billing-identity-gate-bypass` → emits a
+2. Generate + review: `assert-ai acs generate --suite billing-unverified-high-risk-action
+   --run baseline --out artifacts/acs/billing-unverified-high-risk-action` → emits a
    deterministic draft conditioning on `input.policy_target.value.verified`.
    Review it (Step 2): scope to the four high-risk write tools (the generator
    over-/under-covers the tool set), harden `== false` → `not …verified`, then
@@ -469,14 +615,14 @@ by an ACS policy at `artifacts/acs/<suite>/`, baseline `X%` dropped to `Y%`.
    `assert-ai acs validate` can't populate that injected field — verify at the
    guarded remeasure below, not via `validate`.)
 4. Governed: `assert-ai run --config
-   examples/billing_support_agent/evals/identity-gate-bypass/eval_config.governed.yaml`
+   examples/billing_support_agent/evals/unverified-high-risk-action/eval_config.governed.yaml`
    → run `acs-governed` (default manifest + high-risk guarded tools already match
    this suite), `unverified_high_risk_action` drops materially.
-5. Delta: `assert-ai results compare billing-identity-gate-bypass baseline
+5. Delta: `assert-ai results compare billing-unverified-high-risk-action baseline
    acs-governed --metric unverified_high_risk_action` → violation rate drops
    (scenario 33.3%→0%; prompt drops too — a residual can remain where the agent
    only *verbally* agrees to a high-risk action without ever calling the gated
    tool, which a `pre_tool_call` gate structurally cannot block; add an `output`
    semantic gate to also catch the verbal promise). `overrefusal` roughly flat.
-6. Export both runs to HTML, upload to SharePoint, append the ledger row, and
+6. Export both runs to HTML, append the ledger row, and
    `record_suggestion` back to Clarity.

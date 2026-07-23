@@ -35,9 +35,10 @@ or failures for their agent, model, or app.
 > **Switching domains?** `.clarity-protocol/` is a single, non-namespaced scratch
 > directory — a fresh discovery run **overwrites** the prior domain's `failures/`,
 > `goal/`, and `solution/`. Before starting discovery for a *different* agent/domain,
-> archive the existing one to `archive/<prev-domain>/clarity-protocol/` (and move its
-> `artifacts/{acs,results}/<prev-domain>-*` suites to `archive/<prev-domain>/artifacts/`).
-> Clarity re-scaffolds a clean `.clarity-protocol/` on the next `run_clarity`.
+> move the finished protocol into that domain's example folder as
+> `examples/<prev-domain>/Clarity Protocol/` (colocated with the agent it describes),
+> so it is preserved alongside that domain's `evals/` and `acs/`. Clarity re-scaffolds
+> a clean `.clarity-protocol/` on the next `run_clarity`.
 
 ## Step 1 — Parse
 

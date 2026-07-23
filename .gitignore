@@ -87,3 +87,6 @@ README_preannounce.md
 # Per-domain governance ledger written by the govern-and-remeasure workflow.
 # Local working artifact (holds SharePoint links); adopters may commit their own.
 /governance-ledger.md
+
+# Per-run tool-state SQLite DBs written by example agents' real tools (regenerable scratch).
+examples/**/.state.db

@@ -159,7 +159,7 @@ against the governed agent to show the failure rate dropped — the ACS delta. U
 `assert-ai acs generate` / `validate` adapter (no external `acs` CLI). Requires a **callable** target
 whose high-risk tools can be wrapped (`control.protect_tool`); a hosted-model Prompt Agent target has
 nothing wrappable. Follow `../../.claude/skills/run-assert-eval/workflows/govern-and-remeasure.md`
-(baseline → `acs generate` → `acs validate` → governed run → `results compare` → export to SharePoint →
+(baseline → `acs generate` → `acs validate` → governed run → `results compare` → export each run to standalone HTML →
 append `governance-ledger.md`). Reference: `examples/billing_support_agent/`.
 
 ### Output format

@@ -13,6 +13,7 @@ per risk** — without leaving the coding assistant. Risk discovery is owned by
 | `../../.github/prompts/run-assert-eval.prompt.md` | GitHub Copilot mirror. |
 | `../../.cursor/rules/assert.mdc` | Cursor mirror. |
 | `workflows/measure-clarity-failures.md` | The 8-step measurement workflow (parse → triage → configs → run → report → close loop). |
+| `workflows/govern-and-remeasure.md` | The ACS governance workflow: turn a measured failure into a deployable ACS policy (`assert-ai acs generate`), wrap the agent, and re-run the same eval to prove the failure rate dropped. |
 | `clarity_intake.py` | Dependency-free parser: Clarity failure docs → ASSERT candidate behaviors. |
 | `tests/` | Pytest suite + real Clarity fixtures for the parser. |
 | `SETUP-CHECKLIST.md` | One-time in-IDE MCP setup + end-to-end verification. |
@@ -35,6 +36,11 @@ methodologically aligned when changing the flow.
    candidate behaviors; `workflows/measure-clarity-failures.md` runs a **mandatory
    human triage gate**, generates **one atomic `eval_config.yaml` per selected
    failure**, runs them sequentially, and reports one behavior per column.
+4. **Governance (ACS, optional):** when a run surfaces a real failure the user wants
+   to *fix and prove*, `workflows/govern-and-remeasure.md` derives a deployable
+   **ACS** policy from the findings (`assert-ai acs generate`), wraps the agent's
+   high-risk tools (or its output), and re-runs the **same** eval against the
+   governed target to show the failure-rate delta (baseline → governed).
 
 ## The parser (`clarity_intake.py`)
 
