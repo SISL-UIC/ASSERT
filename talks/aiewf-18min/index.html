@@ -70,8 +70,7 @@
   <!-- 0 · Title -->
   <section class="slide center active">
     <div class="kicker">AIEWF 2026</div>
-    <h1><code>min<sub>control</sub> failure(YOUR&nbsp;agent)</code></h1>
-    <div class="sub">eval&nbsp;+&nbsp;control&nbsp;→&nbsp;optimize</div>
+    <h1>eval&nbsp;+&nbsp;control&nbsp;→&nbsp;optimize</h1>
     <div class="sub" style="margin-top:3vh">Chang Liu · Senior Product Manager, Microsoft</div>
   </section>
 
@@ -109,14 +108,10 @@
 
   <!-- 4 · Loop -->
   <section class="slide center">
-    <div class="kicker">The inner loop that powers the outer loop</div>
-    <h2>Evaluate → Control → Optimize</h2>
-    <img class="chart" src="assets/loop_diagram.png" alt="Continuous loop: eval with ASSERT, control with ACS" onerror="chartFail(this)" />
-    <div class="loop">
-      <span class="chip assert">Eval with ASSERT</span>
-      <span class="chip acs">Control with ACS</span>
-      <span class="chip">Spec → Build → Test → CI/CD → Monitor</span>
-    </div>
+    <div class="kicker">Evaluate → Control → Optimize</div>
+    <h2>The inner loop to power the outer loop</h2>
+    <img class="chart" src="assets/loop_diagram.png" alt="Outer lifecycle ring — Spec, Build, Test, CI/CD, Monitor — powered by an inner core: Control with ACS and Eval with ASSERT" onerror="chartFail(this)" />
+    <div class="sub">ASSERT and Agent Control Specification (ACS) work together to close the eval-fix loop across the AI development lifecycle.</div>
   </section>
 
   <!-- 5 · Pareto -->
@@ -126,14 +121,7 @@
     <img class="chart" src="assets/pareto.png" alt="Pareto frontier: unguarded vs defensive prompt vs control plane" onerror="chartFail(this)" />
   </section>
 
-  <!-- 6 · Policy as code -->
-  <section class="slide">
-    <div class="kicker">Generalization</div>
-    <h2>Policy as code — one rule, every domain</h2>
-    <img class="chart" src="assets/generalization_leak.png" alt="Policy-as-code holds across four domains it was never explicitly written for" onerror="chartFail(this)" />
-  </section>
-
-  <!-- 7 · Announcement -->
+  <!-- 6 · Announcement -->
   <section class="slide center">
     <div class="kicker">Open standards for evaluating &amp; controlling AI agents</div>
     <div class="announce">
