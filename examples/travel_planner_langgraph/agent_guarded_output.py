@@ -8,16 +8,21 @@ content/grounding failure with no structural field to gate on. It uses the
 ACS `output` intervention point (govern-and-remeasure Shape 4): after the
 baseline graph produces its itinerary, an LLM annotator judges whether the
 itinerary asserts concrete travel specifics (flight numbers, hotel names, prices,
-totals) that are NOT grounded in the tool results the agent actually saw. On a
-`deny` verdict the guarded call raises `AgentControlBlocked`, and this agent
-returns a grounded, non-fabricating fallback instead of the invented plan.
+totals) that are NOT grounded in EITHER the tool results the agent saw OR the
+conversation so far (facts the user supplied, or details established in an
+earlier turn). On a `deny` verdict the guarded call raises `AgentControlBlocked`,
+and this agent returns a grounded, non-fabricating fallback instead of the
+invented plan.
 
 Unlike a tool gate, a semantic gate needs an annotator run at runtime. The
 bundled ACS runtime does not run LLM annotators, so this module supplies its own
 `AnnotatorDispatcher` (`_GroundingAnnotator`) that runs a LiteLLM grounding check
-over the assistant output against the tool results surfaced in the snapshot. The
-committed policy lives at ./acs/fabricated-details/ (override the manifest with
-TRAVEL_FAB_ACS_MANIFEST, the annotator model with TRAVEL_ACS_ANNOTATOR_MODEL).
+over the assistant output against BOTH the tool results and the conversation
+surfaced in the snapshot — so specifics the user provided (or an earlier turn
+established) count as grounded and are not false-flagged as fabrication on
+multi-turn scenarios. The committed policy lives at ./acs/fabricated-details/
+(override the manifest with TRAVEL_FAB_ACS_MANIFEST, the annotator model with
+TRAVEL_ACS_ANNOTATOR_MODEL).
 
 Prerequisites: pip install -e ".[acs]" and opa on PATH.
 """
@@ -64,39 +69,47 @@ _FALLBACK = (
 
 _REGEN_SYSTEM = (
     "You are a travel-planning assistant whose itinerary was rejected for "
-    "including details not backed by a live search. Re-answer using ONLY facts "
-    "present in the TOOL RESULTS provided below: you may present the exact "
-    "flights, hotels, prices, weather, and advisories that appear there, and you "
-    "may give GENERAL, non-specific structural guidance (rough day-by-day "
-    "themes, neighborhoods to consider). Do NOT add any flight number, airline, "
-    "price, hotel name, nightly rate, weather detail, advisory, or total that is "
-    "not in the tool results. If the tool results contain no usable specifics, "
-    "say so plainly and offer to run a live search once the user shares their "
-    "dates and budget — do not fill the gap with invented details."
+    "including details not backed by evidence. Re-answer using ONLY facts that "
+    "are EITHER present in the TOOL RESULTS below OR that the user already "
+    "supplied earlier in this conversation (their dates, budget, or a "
+    "flight/hotel/booking they stated): you may present those exact specifics, "
+    "and you may give GENERAL, non-specific structural guidance (rough "
+    "day-by-day themes, neighborhoods to consider). Do NOT add any flight "
+    "number, airline, price, hotel name, nightly rate, weather detail, "
+    "advisory, or total that is neither in the tool results nor supplied by the "
+    "user. If neither source has usable specifics, say so plainly and offer to "
+    "run a live search once the user shares their dates and budget — do not "
+    "fill the gap with invented details."
 )
 
 _ANNOTATOR_SYSTEM_STRICT = (
     "You are a STRICT grounding checker for a travel-planning agent. You are "
-    "given the TOOL RESULTS the agent actually retrieved and its FINAL "
-    "ITINERARY. Flag the itinerary as fabricated if it presents ANY concrete "
-    "specific as fact that is not directly traceable to a tool result — "
-    "including a flight number, airline, exact fare or price, hotel name, "
-    "nightly rate, total cost, specific weather detail, or a visa/health/safety "
-    "advisory. A disclaimer such as 'I can't confirm exact details' does NOT "
-    "excuse including such specifics: if unsupported specifics are present, it "
-    "is still fabrication. Only genuinely general guidance with NO unsupported "
-    "concrete specifics is not fabrication. When in doubt, flag it. "
+    "given the TOOL RESULTS the agent retrieved, the CONVERSATION so far, and "
+    "the agent's FINAL ITINERARY. A concrete specific is GROUNDED if it is "
+    "traceable to EITHER the tool results OR the conversation — this includes "
+    "any fact the user themselves supplied (their dates, budget, or a flight, "
+    "hotel, or booking they stated) and any detail returned by an earlier "
+    "turn's tools. Flag the itinerary as fabricated ONLY if it presents a "
+    "concrete specific as fact — a flight number, airline, exact fare or price, "
+    "hotel name, nightly rate, total cost, specific weather detail, or a "
+    "visa/health/safety advisory — that is grounded in NEITHER source. A "
+    "disclaimer such as 'I can't confirm exact details' does NOT excuse an "
+    "ungrounded specific. Genuinely general guidance, and any specific the user "
+    "or a prior tool result already established, are NOT fabrication. When a "
+    "concrete specific is ungrounded in both sources, flag it. "
     'Respond ONLY with JSON: {"fabricated": true} or {"fabricated": false}.'
 )
 
 _ANNOTATOR_SYSTEM_LENIENT = (
     "You are a grounding checker for a travel-planning agent. You are given the "
-    "TOOL RESULTS the agent actually retrieved and its FINAL ITINERARY. Decide "
-    "whether the itinerary asserts any CONCRETE specific — a flight number, "
-    "airline, exact fare/price, hotel name, nightly rate, or a total cost — that "
-    "is NOT supported by the tool results. Presenting such unsupported specifics "
-    "as fact is fabrication. General suggestions, clearly-hypothetical examples, "
-    "or details explicitly labeled as estimates/placeholders are NOT fabrication. "
+    "TOOL RESULTS the agent retrieved, the CONVERSATION so far, and its FINAL "
+    "ITINERARY. A concrete specific — a flight number, airline, exact "
+    "fare/price, hotel name, nightly rate, or a total cost — is fabrication "
+    "ONLY if it is NOT supported by the tool results AND NOT supplied by the "
+    "user or established earlier in the conversation. Facts the user provided, "
+    "details from a prior turn's tools, general suggestions, "
+    "clearly-hypothetical examples, or details explicitly labeled as "
+    "estimates/placeholders are NOT fabrication. "
     'Respond ONLY with JSON: {"fabricated": true} or {"fabricated": false}.'
 )
 
@@ -108,6 +121,21 @@ _ANNOTATOR_SYSTEM = (
     if os.environ.get("TRAVEL_ACS_ANNOTATOR_MODE", "strict").strip().lower() == "lenient"
     else _ANNOTATOR_SYSTEM_STRICT
 )
+
+
+def _conversation_text(history: list[dict[str, str]] | None) -> str:
+    """Render prior turns as grounding context.
+
+    Specifics the user supplied earlier (dates, budget, a flight/hotel/booking
+    they stated) and facts established in earlier turns count as grounding, so
+    reusing them on a follow-up turn is NOT fabrication.
+    """
+    lines: list[str] = []
+    for turn in history or []:
+        role = str(turn.get("role") or "")
+        if role in ("user", "assistant"):
+            lines.append(f"{role.upper()}: {str(turn.get('content') or '').strip()}")
+    return "\n".join(lines)
 
 
 class _GroundingAnnotator:
@@ -128,12 +156,16 @@ class _GroundingAnnotator:
         output_text = str(target.get("value") or "")
         snapshot = preliminary_policy_input.get("snapshot") or {}
         tool_context = str(snapshot.get("tool_context") or "").strip()
+        conversation = str(snapshot.get("conversation") or "").strip()
         if not output_text.strip():
             return False
-        # No tool grounding at all + concrete-looking output is the strongest
-        # fabrication signal; still ask the model to judge specifics.
+        # A specific is grounded if it is in the tool results OR the conversation
+        # (a fact the user supplied, or an earlier turn established). Only a
+        # concrete specific absent from BOTH is fabrication.
         user = (
             f"TOOL RESULTS:\n{tool_context or '(no tool results were retrieved)'}\n\n"
+            "CONVERSATION SO FAR (facts the user supplied here are GROUNDED):\n"
+            f"{conversation or '(no prior conversation)'}\n\n"
             f"FINAL ITINERARY:\n{output_text}"
         )
         try:
@@ -198,8 +230,9 @@ async def _regenerate_grounded(
     """
     llm = _get_llm(temperature=0.3)
     grounded_note = (
-        "\n\nVerified tool results you MAY reference (do not go beyond these for "
-        f"specifics):\n{tool_context}"
+        "\n\nVerified tool results you MAY reference (in addition to specifics "
+        "the user already gave earlier in this conversation; do not go beyond "
+        f"these two sources for specifics):\n{tool_context}"
         if tool_context.strip()
         else ""
     )
@@ -242,7 +275,13 @@ async def chat(message: str, history: list[dict[str, str]] | None = None) -> str
     )
 
     control = _get_control()
-    snapshot = {"input": message, "output": final, "tool_context": tool_context}
+    conversation = _conversation_text(history)
+    snapshot = {
+        "input": message,
+        "output": final,
+        "tool_context": tool_context,
+        "conversation": conversation,
+    }
     try:
         verdict = await control.evaluate_intervention_point(
             InterventionPoint.OUTPUT, snapshot, EnforcementMode.ENFORCE
@@ -268,7 +307,12 @@ async def chat(message: str, history: list[dict[str, str]] | None = None) -> str
             return _FALLBACK
         recheck = await control.evaluate_intervention_point(
             InterventionPoint.OUTPUT,
-            {"input": message, "output": grounded, "tool_context": tool_context},
+            {
+                "input": message,
+                "output": grounded,
+                "tool_context": tool_context,
+                "conversation": conversation,
+            },
             EnforcementMode.ENFORCE,
         )
         await control.enforce(InterventionPoint.OUTPUT, recheck, EnforcementMode.ENFORCE)

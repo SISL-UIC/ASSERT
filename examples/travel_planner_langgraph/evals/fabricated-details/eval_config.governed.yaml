@@ -1,11 +1,21 @@
 # Governed variant of the fabricated-details eval (ACS output-annotator A/B).
 #
 # This is the STRICT gate (chosen operating point): `mini` annotator with the
-# STRICT prompt (flags any unsupported specific) + BLUNT flat-decline fallback.
+# STRICT prompt (flags any unsupported specific) + REGEN fallback (on a block,
+# regenerate a helpful answer grounded in tool results + user-supplied facts, then
+# RE-GATE). REGEN replaces the flat-decline (BLUNT) remediation, which inflated
+# `overrefusal` on multi-turn scenarios (blocked turns collapsed to a flat decline
+# the judge scored as overrefusal). See run-assert-eval skill Step 5a.
 # Set before running:
 #   $env:TRAVEL_ACS_ANNOTATOR_MODEL = "azure/gpt-5.4-mini"
 #   $env:TRAVEL_ACS_ANNOTATOR_MODE  = "strict"
-#   $env:TRAVEL_ACS_FALLBACK_MODE   = "blunt"
+#   $env:TRAVEL_ACS_FALLBACK_MODE   = "regen"
+#
+# A/B (n=25 each, azure/gpt-5.4-mini annotator):
+#   scenario fabricated_details 76% -> 36%,  overrefusal 24% -> 48%
+#   prompt   fabricated_details 36% -> 20%,  overrefusal  8% ->  4%
+# (BLUNT crushed fabrication to 4-16% but spiked scenario overrefusal to 84-92% --
+#  trading one failure for another; REGEN is the balanced operating point.)
 # BYTE-IDENTICAL to eval_config.yaml except `run:` and `target.callable`, so the
 # cached systematize + test_set stages are REUSED (same test cases) -> a true A/B.
 
