@@ -31,6 +31,9 @@
   .center{align-items:center;text-align:center}
   img.chart{max-height:66vh;max-width:88vw;object-fit:contain;align-self:center;
     border-radius:12px;box-shadow:0 8px 40px rgba(0,0,0,.5)}
+  .chartfail{align-self:center;max-width:70vw;background:var(--card);border:1px solid var(--red);
+    border-radius:12px;padding:3vh 3vw;color:var(--muted);font-size:1.25rem;line-height:1.5}
+  .chartfail b{color:var(--red)} .chartfail code{color:var(--ink);font-family:ui-monospace,monospace}
   .stat-row{display:flex;gap:3vw;flex-wrap:wrap;margin-top:1vh}
   .stat{background:var(--card);border:1px solid #1f2937;border-radius:14px;padding:2.2vh 2vw;flex:1;min-width:220px}
   .stat .n{font-size:clamp(2.4rem,5vw,3.6rem);font-weight:800;color:var(--cyan)}
@@ -108,7 +111,7 @@
   <section class="slide center">
     <div class="kicker">The inner loop that powers the outer loop</div>
     <h2>Evaluate → Control → Optimize</h2>
-    <img class="chart" src="assets/loop_diagram.png" alt="Continuous loop: eval with ASSERT, control with ACS" />
+    <img class="chart" src="assets/loop_diagram.png" alt="Continuous loop: eval with ASSERT, control with ACS" onerror="chartFail(this)" />
     <div class="loop">
       <span class="chip assert">Eval with ASSERT</span>
       <span class="chip acs">Control with ACS</span>
@@ -120,14 +123,14 @@
   <section class="slide">
     <div class="kicker">Optimize with an agent control plane</div>
     <h2>Pareto: fewer violations <i>and</i> less over-refusal</h2>
-    <img class="chart" src="assets/pareto.png" alt="Pareto frontier: unguarded vs defensive prompt vs control plane" />
+    <img class="chart" src="assets/pareto.png" alt="Pareto frontier: unguarded vs defensive prompt vs control plane" onerror="chartFail(this)" />
   </section>
 
   <!-- 6 · Policy as code -->
   <section class="slide">
     <div class="kicker">Generalization</div>
     <h2>Policy as code — one rule, every domain</h2>
-    <img class="chart" src="assets/generalization_leak.png" alt="Policy-as-code holds across four domains it was never explicitly written for" />
+    <img class="chart" src="assets/generalization_leak.png" alt="Policy-as-code holds across four domains it was never explicitly written for" onerror="chartFail(this)" />
   </section>
 
   <!-- 7 · Announcement -->
@@ -154,6 +157,16 @@
 <div class="hint">← / → or Space to navigate · F for fullscreen</div>
 
 <script>
+  // Fail loud: if a chart image can't load (e.g. the deck is served from the wrong
+  // folder so assets/ doesn't resolve), replace the broken icon with a clear hint.
+  function chartFail(img){
+    const d = document.createElement('div');
+    d.className = 'chartfail';
+    d.innerHTML = '<b>Chart didn\'t load:</b> <code>' + img.getAttribute('src') + '</code><br>' +
+      'Open <code>index.html</code> directly, or serve from this <code>aiewf-18min/</code> ' +
+      'folder so <code>assets/</code> resolves.';
+    img.replaceWith(d);
+  }
   const slides = [...document.querySelectorAll('.slide')];
   const hud = document.getElementById('hud');
   const dotsWrap = document.getElementById('dots');
