@@ -594,6 +594,11 @@ def main(argv: list[str] | None = None) -> int:
         exit_code = run_pipeline(
             config=str(target_config),
             force_stages=list(args.force_stage),
+            # Pin BOTH stages explicitly. Writing only
+            # pipeline.inference.concurrency would leave the judge on its own
+            # derived default, so a sweep point below that default would be
+            # recorded under a concurrency it never actually ran at.
+            concurrency=args.concurrency,
         )
     except SystemExit as exc:
         exit_code = int(exc.code) if exc.code is not None else 1

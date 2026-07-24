@@ -831,7 +831,7 @@ def parse_pipeline_config(raw: dict[str, Any]) -> PipelineConfig | None:
             scorer_stage,
             field_name="pipeline.judge",
             allowed={"model", "n", "dimensions", "disabled_dimensions", "inference_set_path", "taxonomy_path", "save_dir",
-                       "enabled", "file_path", "preset"},
+                       "enabled", "file_path", "preset", "concurrency"},
         )
         if judge_enabled:
             model_raw = scorer_stage.get("model", default_model_raw)
@@ -873,6 +873,10 @@ def parse_pipeline_config(raw: dict[str, Any]) -> PipelineConfig | None:
                 n=_coalesce(_optional_int(scorer_stage.get("n"), field_name="pipeline.judge.n"), 1),
                 dimensions=dimensions,
                 disabled_dimensions=disabled_dimensions,
+                concurrency=_optional_int(
+                    scorer_stage.get("concurrency"),
+                    field_name="pipeline.judge.concurrency",
+                ),
             )
 
     evaluation = None

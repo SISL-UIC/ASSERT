@@ -185,7 +185,25 @@ def load_checkpoint_judge_config(
             int(inference_stage_raw["concurrency"]),
             field_name="pipeline.inference.concurrency",
         )
-    concurrency = concurrency_override if concurrency_override is not None else inference_concurrency
+    # This script only ever calls the judge model, so it follows the same rule
+    # as the judge stage: an explicit pipeline.judge.concurrency wins verbatim,
+    # and otherwise a target-protecting pipeline.inference.concurrency must not
+    # throttle scoring below the normal default. The derived default is divided
+    # by judge_n because each scored row fans out into judge_n concurrent model
+    # calls (see assert_ai/core/judge.py), which this limit does not bound.
+    judge_concurrency_raw = (
+        judge_stage_raw.get("concurrency") if isinstance(judge_stage_raw, dict) else None
+    )
+    if judge_concurrency_raw is not None:
+        default_concurrency = _require_positive_int(
+            int(judge_concurrency_raw),
+            field_name="pipeline.judge.concurrency",
+        )
+    else:
+        default_concurrency = max(
+            1, max(inference_concurrency, DEFAULT_INFERENCE_CONCURRENCY) // max(1, judge_n)
+        )
+    concurrency = concurrency_override if concurrency_override is not None else default_concurrency
     if concurrency <= 0:
         raise ValueError("concurrency must be > 0")
 

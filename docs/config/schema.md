@@ -200,7 +200,7 @@ Accepted keys:
 - `tester` — mapping. Optional.
   - `model` — model config. Optional when `default_model` is set.
 - `max_turns` — positive integer. Default: `10`.
-- `concurrency` — positive integer. Default: `10`.
+- `concurrency` — positive integer. Default: `10`. Bounds concurrent calls into the **target**. It also seeds the judge stage's default fan-out (see `pipeline.judge.concurrency`), but never lowers it below `10`.
 - `max_tool_calls` — positive integer. Default: `10`.
 - `tool_timeout_s` — optional positive number.
 - `startup_timeout_s` — optional positive number.
@@ -269,6 +269,11 @@ Accepted keys:
   - `scale` — optional ordered custom scale. Set `type: ordinal` and map at least two integer or string grade values to non-empty labels under `values`. All grade values must use the same type, and mapping order defines grade order. Without `scale`, the dimension remains boolean.
 - `model` — model config. Required unless `default_model` is set.
 - `n` — positive integer. Default: `1`.
+- `concurrency` — positive integer. Optional. How many transcripts to score in parallel. Defaults to `max(pipeline.inference.concurrency, 10) // max(judge.n, 1)`.
+
+  The judge never calls your target — it scores transcripts already written to `inference_set.jsonl` — so a low `pipeline.inference.concurrency` set to protect a target that can't be driven in parallel does not hold the judge back. A higher `pipeline.inference.concurrency` is still inherited. The `judge.n` divisor exists because each scored row fans out into `n` concurrent model calls that this setting does not bound.
+
+  **Set this explicitly when the judge model shares a rate limit or deployment with your target**, or when you want scoring pinned to a specific fan-out. The `--concurrency` CLI flag overrides both stages. The effective value is logged at the start of the judge stage.
 - `preset` — optional string or list of strings. Loads judge dimension presets; inline `dimensions` override preset dimensions with the same name.
 
 Compatibility note:

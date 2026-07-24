@@ -703,8 +703,11 @@ cli.add_command(init)
     default=None,
     help=(
         "Override inference/judge fan-out for this run. Wins over "
-        "pipeline.inference.concurrency in the YAML. Defaults to the value in "
-        f"the config (or {DEFAULT_INFERENCE_CONCURRENCY} if unset)."
+        "pipeline.inference.concurrency and pipeline.judge.concurrency in the "
+        "YAML. Without this flag, inference defaults to the config value (or "
+        f"{DEFAULT_INFERENCE_CONCURRENCY} if unset) and the judge — which "
+        "never calls your target — defaults to "
+        f"max(inference.concurrency, {DEFAULT_INFERENCE_CONCURRENCY})."
     ),
     show_envvar=True,
 )

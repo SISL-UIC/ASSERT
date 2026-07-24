@@ -344,6 +344,10 @@ pipeline:
           false = Agent selected the appropriate tool.
     # model: ...                # optional — uncomment to override default_model for the judge
     n: 1                        # optional — judge repetitions for consensus
+    # concurrency: 10           # optional — transcripts scored in parallel.
+                                # Defaults to max(inference.concurrency, 10) // max(n, 1).
+                                # Pin it when the judge model shares a rate limit
+                                # or deployment with the target.
 ```
 
 ### Rubric format

@@ -108,7 +108,20 @@ class TurnCheckpointJudgeTest(unittest.IsolatedAsyncioTestCase):
         inference_concurrency = checkpoint_judge.DEFAULT_INFERENCE_CONCURRENCY
         if isinstance(inference_stage_raw, dict) and inference_stage_raw.get("concurrency") is not None:
             inference_concurrency = int(inference_stage_raw["concurrency"])
-        concurrency = concurrency_override if concurrency_override is not None else inference_concurrency
+        # Mirrors load_checkpoint_judge_config: explicit pipeline.judge.concurrency
+        # wins verbatim, otherwise a target-protecting inference limit must not
+        # throttle judge-only scoring below the default, divided by judge_n
+        # because each row fans out into judge_n concurrent calls.
+        judge_concurrency_raw = judge_stage_raw.get("concurrency")
+        if judge_concurrency_raw is not None:
+            default_concurrency = int(judge_concurrency_raw)
+        else:
+            default_concurrency = max(
+                1,
+                max(inference_concurrency, checkpoint_judge.DEFAULT_INFERENCE_CONCURRENCY)
+                // max(1, judge_n),
+            )
+        concurrency = concurrency_override if concurrency_override is not None else default_concurrency
         self.assertGreater(concurrency, 0)
 
         return checkpoint_judge.CheckpointJudgeConfig(

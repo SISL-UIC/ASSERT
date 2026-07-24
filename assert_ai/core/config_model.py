@@ -219,12 +219,17 @@ class JudgeConfig:
     n: int = 1
     dimensions: list[dict[str, Any]] = field(default_factory=list)
     disabled_dimensions: list[str] = field(default_factory=list)
+    # ``None`` means "derive from inference.concurrency" — see
+    # ``EvaluationConfig.judge_concurrency``.
+    concurrency: int | None = None
 
     def __post_init__(self) -> None:
         if isinstance(self.model, str):
             self.model = ModelConfig(name=self.model)
         if self.n <= 0:
             raise ValueError("judge.n must be > 0")
+        if self.concurrency is not None and self.concurrency <= 0:
+            raise ValueError("judge.concurrency must be > 0")
         if not isinstance(self.dimensions, list):
             raise ValueError("judge.dimensions must be a list")
         for dimension in self.dimensions:
@@ -245,6 +250,35 @@ class EvaluationConfig:
     judge: JudgeConfig | None = None
     tester: TesterConfig | None = None
     inference: InferenceConfig = field(default_factory=InferenceConfig)
+
+    @property
+    def judge_concurrency(self) -> int:
+        """Number of transcripts the judge scores in parallel.
+
+        ``inference.concurrency`` throttles calls into the *target* — users
+        lower it (often to 1) because their agent, tracer, or tool backend
+        can't be driven in parallel. The judge never touches the target: it
+        makes stateless LLM calls over transcripts that already exist on
+        disk. Inheriting the target's limit therefore serialized scoring for
+        no reason.
+
+        Explicit ``pipeline.judge.concurrency`` always wins and is used
+        verbatim. Otherwise the default is derived from
+        ``max(inference.concurrency, DEFAULT_INFERENCE_CONCURRENCY)`` so
+        target-constrained configs get the normal default while configs that
+        deliberately widened inference fan-out keep their higher value.
+
+        The derived default is divided by ``judge.n`` because each scored row
+        fans out into ``judge.n`` concurrent model calls that the stage
+        semaphore does not bound (``core/judge.py`` gathers them per row).
+        Without this, ``judge.n=3`` would put 30 calls in flight against a
+        deployment the user may have throttled to 1.
+        """
+        if self.judge is not None and self.judge.concurrency is not None:
+            return self.judge.concurrency
+        budget = max(self.inference.concurrency, DEFAULT_INFERENCE_CONCURRENCY)
+        samples_per_row = max(1, self.judge.n) if self.judge is not None else 1
+        return max(1, budget // samples_per_row)
 
 
 @dataclass

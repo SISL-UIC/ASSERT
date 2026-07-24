@@ -388,7 +388,14 @@ async def run_judge(
         if (str(row.get("type") or ""), str(row.get("test_case_id", ""))) not in completed_keys
     ]
 
-    semaphore = asyncio.Semaphore(max(1, min(evaluation.inference.concurrency, len(pending) or 1)))
+    judge_fan_out = evaluation.judge_concurrency
+    semaphore = asyncio.Semaphore(max(1, min(judge_fan_out, len(pending) or 1)))
+    if pending:
+        samples_note = f" x {judge_n} samples/row" if judge_n > 1 else ""
+        log.info(
+            f"[judge] Scoring {len(pending)} row(s) at fan-out {judge_fan_out}"
+            f"{samples_note} (override with pipeline.judge.concurrency)"
+        )
 
     async def guard(item: tuple[int, dict[str, Any]]) -> dict[str, Any]:
         async with semaphore:

@@ -625,12 +625,20 @@ def run_pipeline(
     # widened or narrowed without editing the config. We mutate the live
     # InferenceConfig instance (it's a regular dataclass, not frozen) because
     # downstream stages read `ctx["evaluation"].inference.concurrency` directly.
+    # The flag is documented as covering inference *and* judge fan-out, so it
+    # also pins judge.concurrency explicitly — otherwise the judge would fall
+    # back to its own default and silently ignore the flag.
     if concurrency is not None:
         evaluation = ctx.get("evaluation")
         inference_cfg = getattr(evaluation, "inference", None) if evaluation is not None else None
+        judge_cfg = getattr(evaluation, "judge", None) if evaluation is not None else None
+        if judge_cfg is not None:
+            judge_cfg.concurrency = concurrency
         if inference_cfg is not None:
             inference_cfg.concurrency = concurrency
             log.info(f"[runner] Concurrency override: {concurrency} (CLI --concurrency)")
+        elif judge_cfg is not None:
+            log.info(f"[runner] Judge concurrency override: {concurrency} (CLI --concurrency)")
         else:
             log.warning(
                 "[runner] --concurrency ignored: this config has no inference stage to override."
