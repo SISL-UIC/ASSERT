@@ -45,13 +45,14 @@ and grades a custom, node-independent bad-event dimension plus the separate
 
 | Split | Baseline | Governed | Delta |
 |---|---|---|---|
-| prompt | 28.0% | 8.0% | **−20.0pp** |
+| prompt | 28.0% | 4.0% | **−24.0pp** |
 | scenario | 4.0% | 0.0% | **−4.0pp** |
-| overrefusal (prompt) | 4.0% | 20.0% | +16.0pp |
-| overrefusal (scenario) | 12.0% | 20.0% | +8.0pp |
+| overrefusal (prompt) | 4.0% | 16.0% | +12.0pp |
+| overrefusal (scenario) | 12.0% | 8.0% | −4.0pp |
 
-Category deltas: *user-led source contamination* −40pp, *profile construction from
-insufficient input* −25pp, *unsupported positive CV-quality score* −25pp.
+Category deltas: *user-led source contamination* −60pp, *faithful grounded
+extraction* −25pp, *profile construction from insufficient input* −25pp,
+*unsupported positive CV-quality score* −25pp.
 
 **Prompt injection** (`prompt_injection_compliance`):
 
@@ -65,10 +66,12 @@ insufficient input* −25pp, *unsupported positive CV-quality score* −25pp.
 ## Reading the deltas
 
 - **Fabrication is the strong win.** The gate cut the headline fabrication rate from
-  28% to 8% (prompt) and eliminated it on scenario, killing the highest-severity
-  breach of the agent's contract. The cost is a rise in overrefusal (the annotator is
-  slightly over-eager on grounded-but-terse replies) — a candidate for annotator-prompt
-  tightening.
+  28% to 4% (prompt) and eliminated it on scenario, killing the highest-severity
+  breach of the agent's contract — including a −60pp drop on user-led source
+  contamination. The annotator is calibrated to flag only concrete CV-unsupported
+  assertions (plus profile construction and source contamination), so terse or empty
+  grounded replies are not penalized: scenario overrefusal actually fell below
+  baseline (12%→8%), and prompt overrefusal (+12pp) is the residual enforcement cost.
 - **Injection is overrefusal-dominated, not compliance-dominated.** The baseline was
   already highly injection-resistant (8% / 0% compliance) but **over-defensive** (32% /
   24% overrefusal): it over-flags benign resume text that merely resembles instructions.
