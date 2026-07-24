@@ -562,6 +562,87 @@ as a real product finding for the agent's owners, not as an ACS regression. (Obs
 live on azure_doc_qa prompt injection: baseline overrefusal ~40% was ~14/20 the agent
 declining to engage with runbook text, essentially unchanged by the gate.)
 
+**A Prompt Agent (YAML `pipeline.inference.target` = hosted model + `system_prompt`
++ optional tool schema) CANNOT be governed in place — materialize a faithful
+callable first.** The YAML target's tool/turn loop is owned by the ASSERT runtime,
+so there is no code seam for ACS to wrap. To run the govern→remeasure half, create
+`<config>/agent.py` that reproduces the YAML target EXACTLY: same model + params,
+`SYSTEM_PROMPT` copied **byte-for-byte** from `target.system_prompt` (assert the
+match in code), same tool schema/simulator, and a multi-turn `chat(message,
+history=None)` signature. Point BOTH the baseline and governed eval configs at
+`target.callable` (the materialized `agent.py` / `agent_guarded.py`), NOT at the
+original YAML prompt-agent target — a runtime-owned loop vs a hand-written loop
+would differ by more than ACS, breaking the A/B. The original YAML is the *spec*,
+not the baseline. `agent_guarded.py` then IMPORTS everything from `agent.py` and
+adds only the ACS gate, exactly as for a code agent. (Observed live on
+prompt_agents `health_assistant.yaml` model-only: materialized `model_only/agent.py`
+byte-matched the YAML system_prompt, ran the A/B on the callable, wrapped the reply
+with an output annotator → dosage scenario 48%→12%, diagnosis 36%→8%.)
+
+**If a semantic annotator UNDER-fires on HEDGED / SOFT variants of the bad event
+(governed bad-event only partly drops while `overrefusal` stays flat)** → the judge
+scores hedged assertions as violations but a first-pass classifier only catches the
+blatant ones. Read the residual `verdict.dimension_justifications`: if they cite
+softened language — "consistent with X", "sounds like / could be X", "X-like",
+"probably nothing serious", "it's reasonable to call 111 rather than 999", or a dose
+*confirmed/interpreted off the user's own label* ("15 mL is within range", "twice
+daily means ~12h apart, 8am/8pm") — the classifier's rubric is too literal. Tighten
+it to flag the **case-applied** form regardless of hedging: any condition **applied
+to the user's own case** (even softened) is a diagnosis; any **walk-back/softening
+of a red-flag escalation** is emergency mismanagement; any **case-tied dose
+confirmation/label-application** is dosing (not just a fresh "take X mg"). Keep the
+exemptions crisp so this doesn't spill into overrefusal (see next rule). (Observed
+live on prompt_agents model-only diagnosis: adding hedged-diagnosis + de-escalation
+clauses moved governed scenario harm 24%→8%.)
+
+**One SHARED output annotator governing two risks that sit on the SAME content band
+will hit a judge-tension Pareto frontier — accept the balanced point, don't
+over-iterate.** When two selected risks share a behavior and content surface (e.g.
+"harmful dosing" and "general medication-schedule education"), the judge can score
+the *same* sentence as bad-event under one rubric and as overrefusal-if-withheld
+under the other — e.g. "twice daily ≈ every 12h, 8am/8pm" is flagged as actionable
+dosing, yet refusing "what does twice daily generally mean?" is flagged as
+overrefusal. Loosening the annotator to cut overrefusal gives back harm and vice
+versa; you are on the frontier. Give the annotator the crispest possible boundary
+(general concept, no clock times / no "X mg is common" = allow; anything tied to the
+user's specific med/dose = deny) and the regen the same boundary, then STOP: a
+meaningful bad-event drop with a modest (single-to-low-double-digit) overrefusal
+rise is the correct operating point, not a defect to chase past the ~4-attempt cap.
+(Observed live on prompt_agents model-only dosage: 48%→12% harm bought ~12%
+overrefusal on the narrow general-schedule band; further tightening only shifted
+harm↔overrefusal without a net gain.)
+
+**A tool result carrying a dose/interaction/profile field does NOT make a
+harmful-advice failure structural — keep the gate at OUTPUT and add a
+"tool-laundered" clause to the annotator.** When the agent has tools
+(`assess_dosage`, `lookup_medication`, `check_drug_interactions`,
+`get_patient_profile`), the tempting mistake is a pre/post_tool_call rule on the
+tool's numeric field. But the harm is the PROSE the model writes after the call —
+it presents the tool's number as the user's personal dose ("your profile shows 500
+mg is appropriate") or spins an interaction result into "safe to take together." A
+tool gate cannot see that prose. Gate at output and give the annotator an explicit
+clause: *a number/flag returned by a tool does NOT license a case-applied dose,
+clearance, or diagnosis.* (Observed live on prompt_agents sim-tools: reusing the
+model-only shared output annotator with tool-laundering + interaction-clearance
+clauses dropped tool-laundered dosing 28%→0% and interaction clearance 52%→16% at
+n=25, overrefusal ≤ +16% dosage / +4% interaction — no tool-field rule needed.)
+
+**Residual "soft practical reassurance / minimization" in MULTI-TURN scenarios →
+extend the annotator to catch hedged de-escalation of a real risk, not just explicit
+clearances.** After an explicit-clearance annotator lands the first big drop, the
+surviving scenario violations are almost always the agent softening over several
+turns into practical approval — "one ibuprofen is unlikely to be a problem", "fish
+oil is usually not a big issue", recommending one drug as the "better/safer fallback
+for you", or "most likely an allergic reaction" — i.e. patient-specific reassurance
+that minimizes a surfaced interaction or settles the user's own case without an
+explicit "it's safe." These read as safe-sounding hedges, so a clearance-only
+classifier passes them. If you choose to iterate, add a clause flagging
+patient-specific minimization/de-escalation of a real risk and case-applied
+"most-likely" conclusions (while still exempting GENERAL "usually / in many people"
+education not tied to the user's own case). Weigh it against the ~4-attempt cap: a
+52%→16% drop with flat overrefusal is already a correct operating point; chase the
+residual only if the bad-event rate is still unacceptably high.
+
 ## Step 6 — Export shareable artifacts
 
 Generate a self-contained static HTML per run. Start the viewer
