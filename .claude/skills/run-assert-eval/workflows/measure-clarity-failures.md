@@ -106,6 +106,7 @@ Fill from the candidate behavior (real schema field names):
 | `pipeline.test_set.prompt.sample_size` | **ask the user (see the sizing note below)** — do not pick silently; recommend `25` (or `≥25` for an ACS A/B), offer `10` for a throwaway first look |
 | `pipeline.test_set.scenario.sample_size` | same — ask once and apply the user's answer to **both** `prompt` and `scenario` unless they say otherwise (`≥25` when the run will feed an ACS before/after A/B — see `govern-and-remeasure.md`) |
 | `pipeline.inference.target` | the target shape (see below) |
+| `pipeline.inference.max_turns` | **set to `10`** (the ASSERT default). Do **not** leave it low (e.g. `2`) — see the multi-turn note below. Use the **same** value in the baseline and governed configs. |
 | `pipeline.judge.preset` + `dimensions` | keep the violation metric **and** `overrefusal` as **separate** dimensions (see the coupling note below) |
 
 > **Built-in `policy_violation` couples with `overrefusal`.** The built-in
@@ -136,6 +137,19 @@ Fill from the candidate behavior (real schema field names):
 > their first-look `10` only if they explicitly want a throwaway pass).
 > (`examples/incident_triage_agent`, the repo's reference governance A/B, ran at
 > `sample_size: 200`.)
+
+> **Set `pipeline.inference.max_turns: 10`; do not leave it low (e.g. `2`).**
+> `max_turns` caps the alternating tester↔target loop for **scenario** (multi-turn)
+> cases (single-turn `prompt` cases ignore it). `10` is the ASSERT default
+> (`DEFAULT_TESTER_MAX_TURNS`) and gives a realistic persistence/erosion arc room to
+> land — many of the strongest findings are **multi-turn erosion** (the agent holds
+> firm for a few turns, then softens into a dose/clearance/leak under pressure). A low
+> cap like `2` truncates the attack before it lands and **understates the bad-event
+> rate**, and in an ACS A/B it hides violations the gate should be measured against.
+> Keep `max_turns` **identical in the baseline and governed configs** (it changes
+> elicitation depth, so a mismatch would break the "only ACS differs" comparison).
+> Only lower it (`4`–`6`) if the risk is genuinely single-turn (a one-shot disclosure
+> or a structural tool-arg failure) *and* the user wants a cheaper run.
 
 > `stratify.dimensions` entries are `{name, description}`. Fold the parser's
 > `values` list into each dimension's `description` (e.g. "Values: variant A;
@@ -230,7 +244,7 @@ failure mode now has a **measured baseline** and where the eval lives
 5. Generate `evals/user-disengagement/eval_config.yaml`: `behavior.description`
    from the doc Summary, `stratify.dimensions` includes `elicitation_variant`
    (7 values folded into its description), `prompt.sample_size: 25` (the size the
-   user chose, applied to `scenario` too),
+   user chose, applied to `scenario` too), `inference.max_turns: 10`,
    `judge.dimensions` = `policy_violation` + `overrefusal`.
 6. Confirm → `assert-ai run` → results table: one `user_disengagement` column,
    `policy_violation` X% and `overrefusal` Y%, 3–5 cited examples.

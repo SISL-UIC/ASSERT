@@ -80,7 +80,7 @@ python -m pytest .claude/skills/run-assert-eval/tests/test_clarity_intake.py
    look, `50`+ = tightest), then generates `evals/user-disengagement/eval_config.yaml`:
    `behavior.description` from the doc Summary, `test_set.stratify.dimensions`
    includes `elicitation_variant`, `test_set.prompt.sample_size` set to the user's
-   choice (same for `scenario`),
+   choice (same for `scenario`), `inference.max_turns: 10`,
    `judge.dimensions` = `policy_violation` + `overrefusal`.
 5. **Confirm** → `assert-ai run` → results table: one `user_disengagement` column,
    `policy_violation` X% and `overrefusal` Y% (reported separately), 3–5 cited cases.
