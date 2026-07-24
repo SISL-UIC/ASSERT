@@ -124,6 +124,27 @@ lives in the standalone
 [`responsibleai/assert-ci-banking-demo`](https://github.com/responsibleai/assert-ci-banking-demo)
 repo.
 
+### Productionizing the gate
+
+The policy here is tuned for a **demo**, so a few decisions deliberately fail *open* to
+keep the walkthrough smooth. Before adapting it to a real deployment, switch these to
+fail *closed*:
+
+- **Post-tool-call scrubber.** The sensitivity / grounding gates read typed signals
+  (`risk_tier`, `referenced_accounts`, `grounded`) from the tool result. If a result is
+  unparseable or omits the signal, the policy falls through to `allow` (`risk_tier`
+  defaults to `standard`, `grounded` to `true`). In production, treat a missing or
+  malformed signal as a **deny/escalate** for the sensitivity dimension.
+- **Policy-engine errors.** The enforcement shim currently allows on an OPA evaluation
+  error. A real control plane should **fail closed or escalate** when the decision point
+  is unavailable.
+- **Input PII regex.** The SSN gate matches only the hyphenated `NNN-NN-NNNN` form; the
+  typed post-call gates are the real protection, not this regex.
+
+The highest-severity, irreversible actions (`create_transfer`, `freeze_account`,
+`enable_admin_mode`) are already gated **pre-tool-call and fail closed**, so worst-case
+severity is bounded even in the demo.
+
 ### Re-run the evals (Azure credentials required)
 
 Each beat is one command; all three share a frozen test set so they're strictly comparable.
