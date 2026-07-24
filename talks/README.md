@@ -1,13 +1,9 @@
 # Talks
 
-Follow-along slideshows for ASSERT talks. Each is a static HTML deck —
-just **open `index.html` in any browser**, no build step.
-
-> **Serving over a local web server?** Serve from the deck's own folder so the
-> relative `assets/` images resolve, e.g. from `aiewf-18min/` run
-> `python -m http.server` and open `http://localhost:8000/`. Serving from the
-> repo root instead will 404 the chart images (the deck fails loud and tells you).
-> Opening `index.html` directly (double-click / `file://`) always works.
+Follow-along slideshows for ASSERT talks. Each is a **single self-contained
+HTML file** — the chart images are embedded as data URIs, so you can download
+`index.html` on its own and open it in any browser (double-click / `file://`)
+or serve it from anywhere. No build step, no sibling folders required.
 
 | Talk | Deck | Length |
 |---|---|---|
