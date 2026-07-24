@@ -11,7 +11,7 @@ just **open `index.html` in any browser**, no build step.
 
 | Talk | Deck | Length |
 |---|---|---|
-| **AI Engineer World's Fair 2026** — *`min_control failure(YOUR agent)`* | [`aiewf-18min/index.html`](aiewf-18min/index.html) | 18 min · 8 slides |
+| **AI Engineer World's Fair 2026** — *evaluate and optimize your AI agents* | [`aiewf-18min/index.html`](aiewf-18min/index.html) | 18 min · 7 slides |
 
 ## Navigating a deck
 

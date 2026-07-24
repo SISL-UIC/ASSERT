@@ -1,7 +1,7 @@
 # Bank-manager agent — evaluate & control an agent against *your* policy
 
 A self-contained ASSERT example, and the live demo behind the AIEWF talk
-*"`min_control failure(YOUR agent)`"*. It takes one banking support agent through
+*"evaluate and optimize your AI agents"*. It takes one banking support agent through
 three beats — **baseline → defensive prompting → principled control plane** — and
 uses ASSERT to *measure* the difference and ACS ([Agent Control
 Specification](https://github.com/responsibleai/AgentControlSpecification)) to
