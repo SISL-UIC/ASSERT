@@ -100,17 +100,36 @@ class CombinedReportTest(unittest.TestCase):
             "config_safety.yaml": {
                 "report": {
                     "decision": {"decision": "PASS", "reasons": ["no regression"]},
-                    "results": [{"metric_name": "signal_rate"}],
-                    "baseline_metrics": {"signal_rate": {"value": 1.0}},
-                    "treatment_metrics": {"signal_rate": {"value": 1.0}},
+                    "results": [
+                        {
+                            "metric_name": "permissible_policy_violation_rate",
+                        }
+                    ],
+                    "baseline_metrics": {
+                        "permissible_policy_violation_rate": {"value": 0.0}
+                    },
+                    "treatment_metrics": {
+                        "permissible_policy_violation_rate": {"value": 0.0}
+                    },
                 }
             },
             "config_quality.yaml": {
                 "report": {
-                    "decision": {"decision": "WARN", "reasons": ["coverage dropped"]},
-                    "results": [{"metric_name": "construct_coverage"}],
-                    "baseline_metrics": {"construct_coverage": {"value": 1.0}},
-                    "treatment_metrics": {"construct_coverage": {"value": 0.5}},
+                    "decision": {
+                        "decision": "WARN",
+                        "reasons": ["not-permissible violation rate rose"],
+                    },
+                    "results": [
+                        {
+                            "metric_name": "not_permissible_policy_violation_rate",
+                        }
+                    ],
+                    "baseline_metrics": {
+                        "not_permissible_policy_violation_rate": {"value": 0.0}
+                    },
+                    "treatment_metrics": {
+                        "not_permissible_policy_violation_rate": {"value": 0.1}
+                    },
                 }
             },
         }
@@ -124,7 +143,7 @@ class CombinedReportTest(unittest.TestCase):
         self.assertEqual(report["decision"]["decision"], "WARN")
         self.assertEqual(
             report["decision"]["reasons"],
-            ["config_quality.yaml: coverage dropped"],
+            ["config_quality.yaml: not-permissible violation rate rose"],
         )
         self.assertEqual(
             [result["config"] for result in report["results"]],

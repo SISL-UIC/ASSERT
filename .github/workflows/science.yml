@@ -1,10 +1,9 @@
 # Science Regression Gate — paired efficacy comparisons.
 #
 # Runs the pipeline at the PR's base + head SHAs against both golden failure-mode
-# configs (safety + quality), computes 6 canonical science-efficacy metrics
-# plus 4 auxiliary aggregates, runs paired statistical tests, and gates
-# the PR with Holm-Bonferroni-corrected significance over canonical paired
-# metrics. Dataset-level and auxiliary metrics are advisory.
+# configs (safety + quality), computes policy-violation rates separately for
+# relevant permissible and non-permissible behaviors, runs paired McNemar
+# tests, and gates with Holm-Bonferroni-corrected significance.
 #
 # Phased rollout
 # --------------
