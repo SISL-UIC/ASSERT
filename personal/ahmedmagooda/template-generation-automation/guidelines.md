@@ -25,13 +25,13 @@ gaps. Metrics guide this process, but they do not replace final human judgment.
 
 Before starting, define:
 
-- the harm name, preferably matching a preset in
+- The harm name, preferably matching a preset in
   [`assert_ai/library/behaviors/`](../../../assert_ai/library/behaviors/);
-- an optional behavior description when the repository does not already contain
+- An optional behavior description when the repository does not already contain
   an appropriate definition;
-- the target context, including its users, tasks, domain, tools, and interaction
+- The target context, including its users, tasks, domain, tools, and interaction
   model; and
-- the target shape: a traced Python callable or agent, a hosted Prompt Agent, or
+- The target shape: a traced Python callable or agent, a hosted Prompt Agent, or
   a black-box endpoint.
 
 Generating candidate templates requires an assistant that can run the
@@ -218,17 +218,17 @@ Human review is required because embedding similarity and LLM grading cannot
 establish that a dimension is valid, useful, or safe to execute. For every final
 dimension, verify that:
 
-- the dimension has a documented connection to the harm's mechanism,
+- The dimension has a documented connection to the harm's mechanism,
   manifestation, severity, detection, or mitigation;
-- the evidence comes from at least two independent authoritative sources, or one
+- The evidence comes from at least two independent authoritative sources, or one
   authoritative source plus an exact repository behavior specification;
-- its levels are distinct, meaningful, and capable of producing materially
+- Its levels are distinct, meaningful, and capable of producing materially
   different test cases;
-- the configured target can enact the variation and the judge can observe it;
-- it does not duplicate another dimension under different terminology;
-- citations resolve to sources that were actually retrieved and support the
+- The configured target can enact the variation and the judge can observe it;
+- It does not duplicate another dimension under different terminology;
+- Citations resolve to sources that were actually retrieved and support the
   associated claim; and
-- the dimension remains descriptive and does not introduce operationally harmful
+- The dimension remains descriptive and does not introduce operationally harmful
   content.
 
 Review the complete set as well as each individual dimension. Confirm that the
@@ -247,12 +247,12 @@ and run a small ASSERT smoke test before scheduling a full evaluation:
 assert-ai run --config <templates-dir>/<harm>/merged/eval_config.yaml
 ```
 
-## Definition of Done
+## Acceptable template
 
-A harm template is ready for use when:
+A harm template is acceptable when:
 
-- one consolidated, runnable `eval_config.yaml` contains all retained dimensions;
-- the analysis report shows acceptable diversity, relevance, and coverage for the
-  intended deployment;
-- a human reviewer has resolved duplicate groups and coverage suggestions; and
-- the configuration passes schema validation and a smoke run.
+- One consolidated, runnable `eval_config.yaml` contains all retained dimensions.
+- The analysis report shows acceptable diversity, relevance, and coverage for the
+  intended deployment.
+- A human reviewer has resolved duplicate groups and coverage suggestions.
+- The configuration passes schema validation and a smoke run.
