@@ -1,4 +1,4 @@
-# Harm-template-generation skill comparison experiment
+# Harm-template-generation skill comparison report
 
 For each of the following three harms, we ran the automatic template generation three time using both V1 and V2 versions of the skill. 
 
