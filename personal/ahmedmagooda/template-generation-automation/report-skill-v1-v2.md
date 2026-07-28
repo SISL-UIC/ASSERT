@@ -32,7 +32,7 @@ We then evaluated both V1, V2 generated templates using the following metrics to
 | All-dimension adversarial mean (0-100) | 56.6970 | 58.9481 | +2.2511 |
 | Scenario-space coverage (0-100) | 69.6667 | 85.3333 | +15.6667 |
 
-<!-- ![Overall Skill-v1 and Skill-v2 comparison](plots/overall_comparison.png) -->
+<!-- ![Overall Skill-v1 and Skill-v2 comparison](figures/overall_comparison.png) -->
 
 
 ## Dimension counts by harm
@@ -58,7 +58,7 @@ We then evaluated both V1, V2 generated templates using the following metrics to
 | Relationship entanglement | 9 (81.8%) | 19 (70.4%) | +10 | 9/9 (100.0%) | 18/19 (94.7%) | +9 |
 | Imminent crisis management | 9 (81.8%) | 16 (69.6%) | +7 | 9/9 (100.0%) | 16/16 (100.0%) | +7 |
 
-![Dimension counts by harm for Skill-v1 and Skill-v2](plots/coverage_by_harm.png)
+![Dimension counts by harm for Skill-v1 and Skill-v2](figures/coverage_by_harm.png)
 
 
 ### V1 perfect / unique and V2 perfect / unique (relevancy score is 4/4)
@@ -69,7 +69,7 @@ We then evaluated both V1, V2 generated templates using the following metrics to
 | Relationship entanglement | 66.7% | 84.2% | +17.5 pp |
 | Imminent crisis management | 88.9% | 75.0% | -13.9 pp |
 
-![Relevance rates by harm for Skill-v1 and Skill-v2](plots/relevance_rates.png)
+![Relevance rates by harm for Skill-v1 and Skill-v2](figures/relevance_rates.png)
 
 ## Diversity and mean relevance
 
@@ -85,7 +85,7 @@ We then evaluated both V1, V2 generated templates using the following metrics to
 | Imminent crisis management | LLM pair diversity | 0.9271 | 0.9453 | +0.0182 |
 | Imminent crisis management | Relevance mean (0-4) | 3.9091 | 3.7826 | -0.1265 |
 
-![Diversity and mean relevance by harm](plots/diversity_and_relevance.png)
+![Diversity and mean relevance by harm](figures/diversity_and_relevance.png)
 
 ## Expected adversarial pressure
 
@@ -113,7 +113,7 @@ rates. Variances describe the complete generated dimension set for each harm.
 
 Distribution cells show `count (share of that harm's dimensions)`.
 
-![Adversarial mean, variance, and score distributions](plots/adversarial_pressure.png)
+![Adversarial mean, variance, and score distributions](figures/adversarial_pressure.png)
 
 ## Canonical harm scenario-space coverage
 
@@ -126,7 +126,7 @@ expressible by each union of dimensions after discounting duplication and gaps.
 | Relationship entanglement | 70 | 81 | +11 |
 | Imminent crisis management | 70 | 86 | +16 |
 
-![Canonical harm scenario-space coverage](plots/scenario_space_coverage.png)
+![Canonical harm scenario-space coverage](figures/scenario_space_coverage.png)
 
 
 ## Prioritized weak coverage points
@@ -555,4 +555,4 @@ pipeline:
 | Relationship entanglement | 4/3/4 | 8/9/10 | 0.2222 | 0.6667 | 0 | 0 |
 | Imminent crisis management | 4/3/4 | 8/7/8 | 0.2222 | 0.2222 | 0 | 0 |
 
-![Run counts, population variance, and redundant pairs](plots/run_consistency.png)
+![Run counts, population variance, and redundant pairs](figures/run_consistency.png)
