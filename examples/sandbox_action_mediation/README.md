@@ -1,74 +1,135 @@
 # Sandboxed action mediation
 
-Evaluate a configured agent without allowing irreversible side effects to reach
-the outside world, while preserving the attempted actions as judge evidence.
+Evaluate a configured agent's actions without allowing irreversible side effects
+to reach the outside world. ASSERT records what the agent attempted, what policy
+decided, and what actually executed as normal judge evidence.
 
-This example separates two concerns:
+Two files answer separate questions:
 
 - `policy.yaml` decides **whether** a tool call is passed, mocked, or blocked.
-- `mocks.yaml` decides **what** a mocked call returns.
+- `mocks.yaml` decides **what** an already-mocked call returns.
 
-The mock file cannot change an enforcement decision. It supplies content only
-after the policy has already selected `mock`.
+Mock content cannot change an enforcement decision. It is consulted only after
+policy has selected `mock`.
 
-## What is included
+## Target choices
 
-- `assert-setup.yaml` describes the mediated endpoint plus its policy, mock file,
-  and cassettes.
+`pipeline.inference.target.sandbox` points to one setup file. The setup supports:
+
+- `kind: container` — ASSERT starts a fresh stock Docker sandbox for each test
+  case, waits for readiness, sends the turns, and removes it afterward.
+- `kind: endpoint` — ASSERT uses an already-running sandbox whose containment and
+  lifecycle are owned elsewhere.
+
+The stock container path applies:
+
+- a read-only root filesystem, a non-root default user, dropped Linux capabilities,
+  `no-new-privileges`, process/memory/CPU limits, and writable tmpfs mounts;
+- a dedicated no-masquerade network, which gives direct public traffic no route;
+- an authenticated, deny-by-default HTTP(S) proxy that records allowed and denied
+  proxy-aware requests as `network_egress` evidence;
+- read-only policy and mock mounts plus a separate writable output mount;
+- optional host-side model credential routing. The container receives a random
+  short-lived proxy token, never the provider credential.
+
+Raw sockets and clients that ignore proxy variables are still blocked by the
+Docker network, but those blocks are silent. The container needs the Docker host
+gateway to reach the two authenticated proxies, so host-port filtering remains a
+hardening opportunity.
+
+## Files in this example
+
+- `assert-setup-container.yaml` configures the stock Docker path.
+- `assert-setup.yaml` configures an already-running endpoint.
 - `policy.yaml` passes internal reads/writes against disposable state, mocks
   irreversible outside-world actions, and blocks unknown tools.
-- `mocks.yaml` demonstrates per-use-case argument matching, simulated failures,
-  and replay with field overrides.
-- `eval_config.yaml` drives the running endpoint through ASSERT's standard HTTP
-  target. Tool and mediation events returned by the endpoint are normalized into
-  the judge's existing transcript stream.
+- `mocks.yaml` demonstrates argument matching, simulated failures, stateful
+  scenarios, and replay overrides.
+- `stock_agent/` is a small configured endpoint used to exercise the stock
+  container contract. Replace its image with your configured agent image.
+- `eval_config_container.yaml` runs the stock container target.
+- `eval_config.yaml` runs the equivalent already-running endpoint target.
 
-The telecom data is synthetic. `resume_line` runs against a disposable backend
-that is reset before every case, so a later `get_line_status` sees coherent state.
+The telecom data is synthetic. `resume_line` runs against disposable state, while
 `send_message` remains mocked because a real send has no disposable outside-world
 backend.
 
-## Validate mock setup
+## Validate policy and mocks
 
 From the repository root:
 
 ```bash
 python -m assert_ai.integrations.sandbox.cli validate \
-  examples/sandbox_action_mediation/assert-setup.yaml
+  examples/sandbox_action_mediation/assert-setup-container.yaml
 
 python -m assert_ai.integrations.sandbox.cli resolve \
-  examples/sandbox_action_mediation/assert-setup.yaml \
+  examples/sandbox_action_mediation/assert-setup-container.yaml \
   send_message --args '{"recipient":"555-000-9999","body":"account balance"}'
 ```
 
 Validation reports policy/mock mismatches before an eval. `resolve` shows the
 exact rule and response for one proposed tool call.
 
-## Run the eval
+## Run the stock sandbox
 
-Start a mediated agent endpoint that accepts:
-
-```json
-{"message": "...", "history": []}
-```
-
-and returns:
-
-```json
-{"response": "...", "events": []}
-```
-
-Then run:
+Build the small reference image:
 
 ```bash
-ASSERT_ALLOW_PRIVATE_ENDPOINTS=1 assert-ai run \
-  --config examples/sandbox_action_mediation/eval_config.yaml
+docker build -t assert-sandbox-stock-agent:local \
+  examples/sandbox_action_mediation/stock_agent
 ```
 
-The example assumes the endpoint is listening at
-`http://127.0.0.1:18900/chat`. Change `pipeline.inference.target.endpoint` if
-needed.
+Then run the normal ASSERT pipeline:
 
-Container lifecycle remains owned by the sandbox runtime hosting the endpoint;
-ASSERT uses its normal HTTP target contract. The endpoint's top-level `events`
-are the integration boundary for action evidence.
+```bash
+assert-ai run \
+  --config examples/sandbox_action_mediation/eval_config_container.yaml
+```
+
+The reference config uses `concurrency: 1` because every test case receives its
+own disposable container. Increase concurrency only after choosing host resource
+limits appropriate for the configured image.
+
+A configured image must:
+
+1. listen on the declared `target.port`;
+2. expose the declared health and chat paths;
+3. accept `{"message": "...", "history": [...]}`;
+4. return `{"response": "...", "events": [...]}`;
+5. read `ACTION_MEDIATION_POLICY` and `ACTION_MEDIATION_MOCKS` or otherwise apply
+   the same policy before it executes tools.
+
+Top-level `events` become tool/action evidence in `inference_set.jsonl`. Proxy-aware
+egress attempts become `network_egress` events in the same transcript.
+
+## Host-side model credentials
+
+If the configured agent needs a hosted model, add this to the container target:
+
+```yaml
+model_proxy:
+  upstream_url: https://api.example.com/v1/chat/completions
+  credential_env: PROVIDER_API_KEY
+  auth_style: bearer
+  model: configured-model
+  container_base_url_env: OPENAI_BASE_URL
+  container_key_env: OPENAI_API_KEY
+```
+
+Set `PROVIDER_API_KEY` only on the host. ASSERT starts an authenticated local
+proxy, injects a random synthetic key and local base URL into the container, and
+adds the real credential only when forwarding upstream.
+
+The configured image must not already contain credentials. The stock launcher
+prevents host credentials from being injected, but it cannot remove secrets that
+were baked into an image before ASSERT received it.
+
+Do not put keys, tokens, passwords, or secrets under `target.env`; startup rejects
+credential-like environment names.
+
+## Use an existing endpoint instead
+
+An externally managed sandbox may use `assert-setup.yaml` and `eval_config.yaml`.
+Its HTTP response follows the same `response` plus `events` contract. For local
+private addresses, set `ASSERT_ALLOW_PRIVATE_ENDPOINTS=1` explicitly before the
+run; this override is not needed for containers started by ASSERT itself.

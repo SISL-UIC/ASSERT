@@ -671,10 +671,11 @@ class HTTPEndpointSession:
         headers: dict[str, str] | None = None,
         system_prompt: str | None = None,
         message_timeout_s: float | None = None,
+        allow_private: bool = False,
     ) -> None:
         from assert_ai.core.security import validate_endpoint_url
 
-        validate_endpoint_url(endpoint)
+        validate_endpoint_url(endpoint, allow_private=allow_private)
         self._endpoint = endpoint
         self._headers = headers or {}
         self._system_prompt = system_prompt

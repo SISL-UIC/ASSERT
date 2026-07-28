@@ -169,3 +169,22 @@ For black-box services, that response text is all the judge sees. An instrumente
 ```
 
 This is the recommended HTTP shape for a sandboxed or mediated agent: the agent owns its real tool loop, the endpoint controls execution, and ASSERT receives the ordered action evidence through its existing transcript event stream.
+
+#### Stock Docker sandbox (`target.sandbox`)
+
+When ASSERT should own containment and lifecycle, point the target at a sandbox
+setup YAML instead of a URL:
+
+```yaml
+pipeline:
+  inference:
+    concurrency: 1
+    target:
+      sandbox: ./assert-setup-container.yaml
+```
+
+The setup declares the configured image, endpoint contract, policy, mocks,
+resource limits, egress allow-list, and optional host-side model proxy. ASSERT
+starts a fresh disposable container per test case, waits for readiness, and
+removes the container and its network after the case. See the
+[sandboxed action-mediation example](../../examples/sandbox_action_mediation/README.md).

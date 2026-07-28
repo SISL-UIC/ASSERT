@@ -57,9 +57,8 @@ class TargetSpec:
     `endpoint` — an already-running agent (local process, staged sandbox, remote
     service) reachable over HTTP. ASSERT drives it through its connector.
 
-    `container` — an image the sandbox launches. The launch itself stays with the
-    existing runtime_contract/backends layer; this records what to launch so the
-    setup file is the single place a user declares their target.
+    `container` — an image the stock ASSERT sandbox launches and removes around
+    each test case.
     """
 
     kind: str
@@ -69,6 +68,15 @@ class TargetSpec:
     command: list[str] = field(default_factory=list)
     env: dict[str, str] = field(default_factory=dict)
     port: int | None = None
+    health_path: str = "/health"
+    endpoint_path: str = "/chat"
+    startup_timeout_s: float = 60.0
+    egress_allow_hosts: tuple[str, ...] = ()
+    memory: str = "1g"
+    cpus: float = 1.0
+    pids_limit: int = 256
+    user: str = "65534:65534"
+    model_proxy: dict[str, Any] | None = None
 
     def describe(self) -> str:
         if self.kind == "endpoint":
@@ -84,6 +92,8 @@ class MediationSetup:
     policy: MediationPolicy
     mocks: MockLibrary
     source_path: Path | None = None
+    policy_path: Path | None = None
+    mocks_path: Path | None = None
     cassette_dir: Path | None = None
 
     def mediator(self) -> ActionMediator:
@@ -149,13 +159,34 @@ def _load_target(data: Any) -> TargetSpec:
     env = data.get("env") or {}
     if env and not isinstance(env, Mapping):
         raise SetupError("`target.env` must be a mapping")
+    model_proxy = data.get("model_proxy")
+    if model_proxy is not None and not isinstance(model_proxy, Mapping):
+        raise SetupError("`target.model_proxy` must be a mapping")
+    egress = data.get("egress") or {}
+    if not isinstance(egress, Mapping):
+        raise SetupError("`target.egress` must be a mapping")
+    allow_hosts = egress.get("allow_hosts") or []
+    if not isinstance(allow_hosts, list):
+        raise SetupError("`target.egress.allow_hosts` must be a list")
+    port = int(data.get("port") or 0)
+    if not 1 <= port <= 65535:
+        raise SetupError("`target.kind: container` requires `port:` between 1 and 65535")
     return TargetSpec(
         kind=kind,
         image=image,
         command=[str(c) for c in command],
         env={str(k): str(v) for k, v in env.items()},
-        port=data.get("port"),
+        port=port,
         model=data.get("model"),
+        health_path=str(data.get("health_path") or "/health"),
+        endpoint_path=str(data.get("endpoint_path") or "/chat"),
+        startup_timeout_s=float(data.get("startup_timeout_s") or 60.0),
+        egress_allow_hosts=tuple(str(host) for host in allow_hosts),
+        memory=str(data.get("memory") or "1g"),
+        cpus=float(data.get("cpus") or 1.0),
+        pids_limit=int(data.get("pids_limit") or 256),
+        user=str(data.get("user") or "65534:65534"),
+        model_proxy={str(key): value for key, value in model_proxy.items()} if model_proxy else None,
     )
 
 
@@ -195,6 +226,7 @@ def load_setup(path: str | Path) -> MediationSetup:
             raise SetupError(f"cassette dir not found: {cassette_dir}")
 
     mocks_ref = data.get("mocks")
+    mocks_path: Path | None = None
     if mocks_ref:
         mocks_path = _resolve(base, str(mocks_ref))
         if not mocks_path.exists():
@@ -211,6 +243,8 @@ def load_setup(path: str | Path) -> MediationSetup:
         policy=policy,
         mocks=mocks,
         source_path=setup_path,
+        policy_path=policy_path,
+        mocks_path=mocks_path,
         cassette_dir=cassette_dir or mocks.cassette_dir,
     )
 

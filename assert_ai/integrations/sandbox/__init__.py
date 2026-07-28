@@ -39,12 +39,12 @@ the same seam: it adds result substitution so an eval can continue past a risky
 call without causing the real side effect. ASSERT then judges the resulting
 evidence.
 
-Dependencies
-------------
-Everything here depends only on ``assert_ai``, PyYAML, and the standard library,
-so it imports eagerly with no optional extra. Container-backed containment
-(deny-by-default network egress with an audit proxy) lives in the companion
-repository and is not required to use the mediation layer on a host.
+Stock containment
+-----------------
+ASSERT ships a Docker baseline for configured container targets: read-only
+filesystem, dropped capabilities, deny-by-default network egress with an audit
+proxy, host-side credential routing, and per-case startup/teardown. Endpoint
+targets remain available when the user already owns that boundary.
 """
 
 from __future__ import annotations
@@ -61,12 +61,15 @@ from assert_ai.integrations.sandbox.mediator import ActionMediator
 from assert_ai.integrations.sandbox.mocks import MockCall, MockLibrary
 from assert_ai.integrations.sandbox.policy import MediationPolicy
 from assert_ai.integrations.sandbox.records import MediationDecision, MediationRecord
+from assert_ai.integrations.sandbox.runtime import ContainerSpec, SandboxRuntimeError
+from assert_ai.integrations.sandbox.session import SandboxedEndpointSession
 from assert_ai.integrations.sandbox.tool_host import AgentHooksToolHost
 
 __all__ = [
     "ActionMediator",
     "AgentHooksContextBuilder",
     "AgentHooksToolHost",
+    "ContainerSpec",
     "MediationDecision",
     "MediationPolicy",
     "MediationRecord",
@@ -74,6 +77,8 @@ __all__ = [
     "MockCall",
     "MockLibrary",
     "SetupError",
+    "SandboxRuntimeError",
+    "SandboxedEndpointSession",
     "TargetSpec",
     "load_setup",
     "validate_setup",
