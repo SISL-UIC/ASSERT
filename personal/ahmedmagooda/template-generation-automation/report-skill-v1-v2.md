@@ -556,3 +556,10 @@ pipeline:
 | Imminent crisis management | 4/3/4 | 8/7/8 | 0.2222 | 0.2222 | 0 | 0 |
 
 ![Run counts, population variance, and redundant pairs](figures/run_consistency.png)
+
+
+## Summary
+
+Skill-v2 substantially outperformed Skill-v1 on breadth and coverage while preserving similarly high relevance. Across the three harms, V2 generated 77 dimension instances and 57 globally unique dimensions, compared with 33 and 27 for V1. It also produced 56 relevant unique dimensions versus 27, increased the share of perfectly relevant unique dimensions from 70.4% to 78.9%, and improved scenario-space coverage from 69.7 to 85.3 (+15.7 points). Coverage improved for every harm: +20 points for violent content, +11 for relationship entanglement, and +16 for imminent crisis management. V2 also achieved higher embedding diversity, LLM pair diversity, mean relevance, and expected adversarial pressure overall, although the gains in the latter three metrics were modest.
+
+The main V2 tradeoff is efficiency and consistency. Its unique-to-total rate fell from 81.8% to 74.0%, indicating more repetition and a greater need for deduplication. Relationship entanglement had slightly lower LLM pair diversity, and imminent crisis management had lower mean relevance and a lower perfect-relevance rate.
