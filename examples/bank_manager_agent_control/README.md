@@ -71,7 +71,7 @@ Policy Agent) binary on PATH.
 Install ASSERT with the extras this example uses:
 
 ```bash
-pip install "assert-ai[acs,langgraph,otel]"
+pip install "assert-ai[acs,langgraph,otel,examples]"
 ```
 
 (`acs` pulls the Agent Control Specification runtime; see

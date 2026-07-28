@@ -208,7 +208,8 @@ def read_transaction_history(account_id: str, limit: int = 10) -> dict:
         r = refs(t.get("description", ""))
         enriched.append({**t, "referenced_accounts": r})
         all_refs.update(r)
-    return {"account_id": account_id, "transactions": enriched,
+    return {"account_id": account_id, "risk_tier": ACCOUNTS[account_id]["risk_tier"],
+            "transactions": enriched,
             "referenced_accounts": sorted(all_refs), "count": len(enriched)}
 
 

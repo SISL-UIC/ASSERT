@@ -23,6 +23,15 @@ class ToolContracts(unittest.TestCase):
         for k in ("risk_tier", "account_sensitivity", "session_account_reads", "entity_reads"):
             self.assertIn(k, r)
 
+    def test_read_transaction_history_signals(self):
+        # Regression guard: this tool omitted risk_tier entirely, so the
+        # Rego sensitive_read_gate's object.get(..., "standard") default
+        # silently let VIP/high-net-worth transaction history through
+        # un-gated, even though read_transaction_history is in read_tools.
+        r = core.read_transaction_history("ACC-1003")
+        self.assertIn("risk_tier", r)
+        self.assertEqual(r["risk_tier"], "vip")
+
     def test_read_loan_signals(self):
         r = core.read_loan("LN-3002")
         for k in ("ltv", "dti", "delinquency_status", "officer_authority_tier", "risk_tier"):
