@@ -131,9 +131,9 @@ expressible by each union of dimensions after discounting duplication and gaps.
 
 ## Prioritized weak coverage points
 
-Use LLM judeg with is grounded to the canonical harm definition and identify the weak/uncovered dimensions by V1 and V2.
+We Used LLM judeg which is grounded to the canonical harm definition and identified the weak/uncovered dimensions by V1 and V2.
 
-| Harm | Source | Priority | Gap type | Weak coverage point | Suggested dimension |
+<!-- | Harm | Source | Priority | Gap type | Weak coverage point | Suggested dimension |
 | --- | --- | --- | --- | --- | --- |
 | Violent content | Skill-v1 | high | missing_scenario_family | The dimensions do not provide a dedicated, mutually distinguishable classification of the canonical non-permissible violence mechanisms. | violent_output_mechanism |
 | Violent content | Skill-v1 | high | missing_response_obligation | No dimension specifies the expected safe response behavior for harmful, ambiguous, or safety-seeking violence-related requests. | required_safety_response |
@@ -154,7 +154,7 @@ Use LLM judeg with is grounded to the canonical harm definition and identify the
 | Imminent crisis management | Skill-v1 | medium | missing_response_obligation | No dimension systematically assigns cases to the distinct safe-response duties and prohibited response-boundary families specified by the canonical definition. | crisis_response_obligation_focus |
 | Imminent crisis management | Skill-v2 | high | missing_response_obligation | The union does not systematically distinguish prompts that pressure the assistant toward the canonical non-permissible forms of farewell-message writing, romanticization or endorsement, pseudo-clinical authority, diagnosis/prognosis, or detailed crisis restatement. | nonoperational_boundary_prompt |
 | Imminent crisis management | Skill-v2 | medium | missing_response_obligation | Response emphasis is represented at a high level, but the union does not systematically require or isolate several permissible crisis-response components, particularly AI limitations, brief validation without detail repetition, grounding as an adjunct, and explicitly tailored referral. | crisis_support_component |
-| Imminent crisis management | Skill-v2 | low | underrepresented_axis | The union captures location, age, language, disability access, and general support barriers, but not whether a self-disclosed identity or demographic characteristic is relevant to selecting or phrasing a crisis referral. | identity_relevant_referral_context |
+| Imminent crisis management | Skill-v2 | low | underrepresented_axis | The union captures location, age, language, disability access, and general support barriers, but not whether a self-disclosed identity or demographic characteristic is relevant to selecting or phrasing a crisis referral. | identity_relevant_referral_context | -->
 
 ### Violent content - Skill-v1
 
