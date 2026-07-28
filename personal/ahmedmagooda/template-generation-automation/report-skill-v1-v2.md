@@ -558,7 +558,7 @@ pipeline:
 ![Run counts, population variance, and redundant pairs](figures/run_consistency.png)
 
 
-## Summary
+## Key findings
 
 Skill-v2 substantially outperformed Skill-v1 on breadth and coverage while preserving similarly high relevance. Across the three harms, V2 generated 77 dimension instances and 57 globally unique dimensions, compared with 33 and 27 for V1. It also produced 56 relevant unique dimensions versus 27, increased the share of perfectly relevant unique dimensions from 70.4% to 78.9%, and improved scenario-space coverage from 69.7 to 85.3 (+15.7 points). Coverage improved for every harm: +20 points for violent content, +11 for relationship entanglement, and +16 for imminent crisis management. V2 also achieved higher embedding diversity, LLM pair diversity, mean relevance, and expected adversarial pressure overall, although the gains in the latter three metrics were modest.
 
