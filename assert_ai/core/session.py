@@ -10,6 +10,7 @@ import inspect
 import json
 import logging
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -60,6 +61,23 @@ def _sanitize_response_text(text: str) -> str:
             "Credential-like patterns detected and redacted from HTTP endpoint response"
         )
     return sanitized
+
+
+def _sanitize_endpoint_value(value: Any) -> Any:
+    """Recursively redact credential-like strings in endpoint-supplied data.
+
+    Endpoint events are attacker-adjacent: the agent under test can influence
+    tool arguments and tool results, and every one of those strings is persisted
+    into run artifacts. Sanitizing only the final response text would leave the
+    event channel as an unredacted path for the same credential patterns.
+    """
+    if isinstance(value, str):
+        return _sanitize_response_text(value)
+    if isinstance(value, list):
+        return [_sanitize_endpoint_value(item) for item in value]
+    if isinstance(value, Mapping):
+        return {key: _sanitize_endpoint_value(item) for key, item in value.items()}
+    return value
 
 
 # ── Adapter types and helpers ──────────────────────────────────
@@ -713,9 +731,26 @@ class HTTPEndpointSession:
                     raise RuntimeError(
                         f"HTTP endpoint {self._endpoint} returned a non-object JSON response"
                     )
+                raw_text = data.get("response", data.get("text", ""))
+                if raw_text is None:
+                    raw_text = ""
+                elif not isinstance(raw_text, str):
+                    # A non-string response would otherwise be silently dropped
+                    # to an empty answer, which reads as "the agent said nothing"
+                    # instead of "the endpoint is misconfigured".
+                    log.warning(
+                        "HTTP endpoint %s returned a non-string response (%s); coercing to text",
+                        self._endpoint,
+                        type(raw_text).__name__,
+                    )
+                    raw_text = str(raw_text)
                 response = _normalize_connector_response({
-                    "text": data.get("response", data.get("text", "")),
-                    "events": data.get("events"),
+                    # Sanitize before persisting: endpoint-supplied event content
+                    # (tool args, tool results) is agent-influenced and lands in
+                    # run artifacts, so it needs the same redaction as the
+                    # response text.
+                    "text": _sanitize_response_text(raw_text),
+                    "events": _sanitize_endpoint_value(data.get("events")),
                     # Do not persist the complete endpoint payload: it may carry
                     # backend diagnostics or sensitive data. Preserve only the
                     # endpoint identity; normalized event content is retained
@@ -731,8 +766,6 @@ class HTTPEndpointSession:
                 f"Connection error calling HTTP endpoint {self._endpoint}: {exc}"
             ) from exc
 
-        # Sanitize response text to prevent credential leakage into artifacts
-        response.text = _sanitize_response_text(response.text)
         interaction_messages = _serialize_connector_interaction_messages(
             user_text=user_text,
             response=response,

@@ -39,7 +39,7 @@ import yaml
 
 from .mediator import ActionMediator
 from .mocks import MockLibrary
-from .policy import MediationPolicy
+from .policy import MediationPolicy, _glob_match
 from .tool_host import AgentHooksToolHost
 
 SUPPORTED_VERSIONS = frozenset({1})
@@ -231,9 +231,21 @@ def validate_setup(path: str | Path) -> dict[str, Any]:
     }
     mock_tools = setup.mocks.tools()
     summary["mocked_by_policy"] = sorted(policy_mocked)
+    # Both sides may be globs (`send_*` in either file), so compare by pattern
+    # match rather than string equality. Plain set difference reported working
+    # glob rules as dead content and simultaneously claimed their tools fell
+    # back to inline, which is contradictory and trains users to ignore the
+    # validator.
+    def _covers(patterns: set[str], name: str) -> bool:
+        return any(_glob_match(pattern, name) or _glob_match(name, pattern) for pattern in patterns)
+
     # Mocked by policy but with no rule in the mock file: falls back to the
     # policy's inline payload. Legal, but worth surfacing.
-    summary["falls_back_to_inline"] = sorted(policy_mocked - mock_tools)
+    summary["falls_back_to_inline"] = sorted(
+        tool for tool in policy_mocked if not _covers(mock_tools, tool)
+    )
     # In the mock file but never mocked by policy: dead content, usually a typo.
-    summary["unused_mock_rules"] = sorted(mock_tools - policy_mocked)
+    summary["unused_mock_rules"] = sorted(
+        rule for rule in mock_tools if not _covers(policy_mocked, rule)
+    )
     return summary

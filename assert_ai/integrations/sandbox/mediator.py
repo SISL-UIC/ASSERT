@@ -32,12 +32,15 @@ from __future__ import annotations
 
 import copy
 import json
+import logging
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
 from .policy import MediationPolicy
 from .records import MediationDecision
+
+log = logging.getLogger(__name__)
 
 Execute = Callable[[dict[str, Any]], Any]
 
@@ -223,9 +226,25 @@ class ActionMediator:
 
         # Plain hand-authored inline fixture. `poison`/`inject` are accepted as
         # legacy payload keys but carry no special meaning now.
+        # A rule with no payload anywhere is almost always a mistake, and the
+        # old silent `{"status": "ok"}` default made it look like a working
+        # mock. Containment still holds (the real tool never runs), so warn and
+        # return an explicit self-describing placeholder instead of failing the
+        # run.
+        payload = rule.get("mock", rule.get("poison", rule.get("inject")))
+        if payload is None:
+            log.warning(
+                "Tool %r is mocked but no mock payload was found in the policy rule or mock file; "
+                "returning a placeholder response. Add a `mock:` payload or a mocks.yaml rule.",
+                name,
+            )
+            payload = {
+                "status": "ok",
+                "note": f"No mock payload configured for {name}; sandbox returned a placeholder.",
+            }
         return MediationDecision(
             mode="mock",
-            returned=rule.get("mock", rule.get("poison", rule.get("inject", {"status": "ok"}))),
+            returned=payload,
             real_executed=False,
             reason=note,
             matched=matched,
