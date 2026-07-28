@@ -155,9 +155,10 @@ write only to `artifacts/results/` (gitignored) — result artifacts are not com
 
 ## Follow along with the talk
 
-The 18-minute AIEWF deck is published as a follow-along slideshow under
-[`talks/`](../../talks/) — open [`talks/aiewf-18min/index.html`](../../talks/aiewf-18min/index.html)
-in a browser and arrow through the beats.
+The 18-minute AIEWF deck is published as a single-file PDF under
+[`talks/`](../../talks/) — download and open
+[`talks/aiewf-18min/aiewf-2026-deck.pdf`](../../talks/aiewf-18min/aiewf-2026-deck.pdf)
+in any PDF viewer.
 
 ## What's in this directory
 
