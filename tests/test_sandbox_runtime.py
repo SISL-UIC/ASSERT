@@ -313,8 +313,9 @@ def test_model_proxy_requires_synthetic_token_and_injects_real_key_host_side(mon
         upstream.server_close()
 
 
-def test_egress_proxy_requires_synthetic_auth_and_does_not_forward_it(tmp_path):
+def test_egress_proxy_requires_synthetic_auth_and_does_not_forward_it(tmp_path, monkeypatch):
     seen: dict[str, str | None] = {}
+    monkeypatch.setattr(sandbox_runtime, "validate_endpoint_url", lambda url: None)
 
     class Upstream(BaseHTTPRequestHandler):
         def log_message(self, format, *args): pass
@@ -352,6 +353,31 @@ def test_egress_proxy_requires_synthetic_auth_and_does_not_forward_it(tmp_path):
         proxy.server_close()
         upstream.shutdown()
         upstream.server_close()
+
+
+def test_egress_proxy_rejects_private_destination_even_when_allowlisted(tmp_path):
+    proxy, _, port = sandbox_runtime._start_egress_proxy(
+        audit_log=tmp_path / "egress.jsonl",
+        allow_hosts=("127.0.0.1",),
+        proxy_token="synthetic-egress-token",
+    )
+    try:
+        token = base64.b64encode(b"assert:synthetic-egress-token").decode()
+        connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        connection.request(
+            "GET",
+            "http://127.0.0.1:12345/private",
+            headers={"Proxy-Authorization": f"Basic {token}"},
+        )
+        assert connection.getresponse().status == 403
+        rows = [
+            json.loads(line)
+            for line in (tmp_path / "egress.jsonl").read_text().splitlines()
+        ]
+        assert rows[-1]["decision"] == "denied"
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
 
 
 def test_session_close_always_removes_owned_container(tmp_path):

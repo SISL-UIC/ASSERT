@@ -41,6 +41,8 @@ from urllib.parse import urlparse
 
 import yaml
 
+from assert_ai.core.security import validate_endpoint_url
+
 log = logging.getLogger(__name__)
 
 
@@ -181,6 +183,14 @@ class _EgressHandler(BaseHTTPRequestHandler):
         if not host or host not in self.allow_hosts:
             self._deny(host, port, method, path)
             return
+        try:
+            # Exact-host policy is necessary but not sufficient: also block
+            # loopback, private/link-local ranges, and metadata endpoints before
+            # the host process makes the request.
+            validate_endpoint_url(self.path)
+        except ValueError:
+            self._deny(host, port, method, path)
+            return
         self._record(host, port, method, path, "allowed")
         length = int(self.headers.get("content-length", 0) or 0)
         body = self.rfile.read(length) if length else None
@@ -193,7 +203,8 @@ class _EgressHandler(BaseHTTPRequestHandler):
         }
         request = urllib.request.Request(self.path, data=body, headers=headers, method=method)
         try:
-            with urllib.request.urlopen(request, timeout=30) as response:  # noqa: S310 - explicit allow-list
+            # Exact-host policy and ASSERT's SSRF validator constrain this URL.
+            with urllib.request.urlopen(request, timeout=30) as response:  # noqa: S310  # lgtm[py/full-ssrf]
                 raw = response.read()
                 status = response.status
                 content_type = response.headers.get("content-type", "application/octet-stream")
@@ -223,6 +234,11 @@ class _EgressHandler(BaseHTTPRequestHandler):
         host, _, port_text = self.path.partition(":")
         port = int(port_text or 443)
         if not host or host not in self.allow_hosts:
+            self._deny(host, port, "CONNECT", "")
+            return
+        try:
+            validate_endpoint_url(f"https://{host}:{port}/")
+        except ValueError:
             self._deny(host, port, "CONNECT", "")
             return
         self._record(host, port, "CONNECT", "", "allowed")
