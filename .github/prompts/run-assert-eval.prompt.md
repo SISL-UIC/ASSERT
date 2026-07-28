@@ -55,7 +55,8 @@ Help the user set the right target in the config:
 
 - **Framework agent** (LangGraph, CrewAI, etc.) with a Python entry function: use `target.callable` WITH `target.trace` so the judge can cite tool calls and routing.
 - **Hosted model** with a system prompt and optional tools: use `target.model` and `target.tools`.
-- **Pre-collected traces** (no live inference needed): use `assert-ai judge-traces --traces <path> --config <path>`.
+- **Pre-collected traces** (no live inference needed): use `assert-ai judge-traces --traces <path> --config <path>`; do not add a `--trace` flag to `assert-ai run`.
+- **Black-box HTTP endpoint** you cannot instrument: write a thin Python callable shim that calls the endpoint, use it as `target.callable` with no `target.trace`, and state that the judge sees only final text. This is a fallback, not the recommended path.
 
 ### 3. Run the pipeline
 
@@ -99,6 +100,14 @@ Select the suite and run for forest plots, per-dimension breakdowns, facet group
 - **watch a run in progress** → viewer live run monitor (`manifest.json`-driven)
 
 See `docs/guides/use-local-viewer.md` for the full layout.
+
+### 6. Hand off to CI
+
+Once the eval is passing locally and the user wants it enforced on PRs, hand off to the `wire-assert-ci` skill. Do not author CI wiring here; direct the user or agent to the action bootstrap:
+
+```
+read https://raw.githubusercontent.com/responsibleai/assert-action/main/ONBOARD.md
+```
 
 ## Output format
 

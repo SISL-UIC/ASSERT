@@ -51,6 +51,16 @@ cp .env.example .env                     # add your provider key
 assert-ai run --config examples/travel_planner_langgraph/eval_config.yaml
 ```
 
+### Add a CI safety gate
+
+Use [`responsibleai/assert-action`](https://github.com/responsibleai/assert-action) to run ASSERT as a PR regression gate. To wire it from your coding agent:
+
+```text
+read https://raw.githubusercontent.com/responsibleai/assert-action/main/ONBOARD.md
+```
+
+See [`docs/ci/`](docs/ci/README.md) for the short hand-off.
+
 <table align="center" style="width: 100%; border: 1px solid #d0d7de; border-collapse: collapse;">
         <tr>
                 <th style="border: 1px solid #d0d7de; padding: 10px; text-align: left;">🌐 Project website ↗</th>
