@@ -119,16 +119,7 @@ judgments, and deterministic aggregation. It grounds harm-level grading in the
 canonical behavior descriptions under `assert_ai/library/behaviors/` and
 `examples/behavior_specs/`.
 
-First, validate the directory structure and input counts without making network
-requests:
-
-```bash
-.venv/bin/python personal/ahmedmagooda/template-generation-automation/evaluate_template_generation.py \
-  <templates-dir> \
-  --validate-only
-```
-
-Then run the Azure-backed evaluation from the repository root:
+Run template evaluation using:
 
 ```bash
 .venv/bin/python personal/ahmedmagooda/template-generation-automation/evaluate_template_generation.py \
