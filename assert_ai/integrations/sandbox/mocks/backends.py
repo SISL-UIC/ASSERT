@@ -3,9 +3,9 @@
 
 """Mock backends: where a mocked tool response comes from.
 
-Ahmed Magooda's design-review steer was to *not* reinvent service-integration
-mocking, and to keep the backend modular so different services can keep their
-own API/response semantics. This module defines the seam that makes that
+Do not reinvent service-integration mocking, and keep the backend modular so
+different services can retain their own API/response semantics. This module
+defines the seam that makes that
 possible: the mock layer resolves *which* rule applies, then hands off to a
 backend to produce the bytes.
 
@@ -55,8 +55,8 @@ class Resolution:
 
     `mock_source` is provenance, matching the mediator's existing vocabulary
     (inline | replay | override). `is_error` lets a backend express a *simulated
-    failure* — Ahmed explicitly asked for mimic-failure so an eval can test how
-    the agent handles a failing tool — without inventing a fourth enforcement
+    failure* so an eval can test how the agent handles a failing tool — without
+    inventing a fourth enforcement
     mode. A simulated failure is still a mock: the real tool did not run.
     """
 
@@ -93,8 +93,8 @@ class InlineBackend:
 class ScenarioBackend:
     """Stateful, sequenced responses — the WireMock scenario pattern.
 
-    This is the direct answer to Ahmed's load-bearing question: if you mock a
-    state-changing call, a later read has to reflect it. A scenario rule declares
+    If you mock a state-changing call, a later read has to reflect it. A scenario
+    rule declares
     an ordered list of responses and, optionally, the state transition each one
     performs. The backend keeps per-scenario state for the life of a run and
     advances it as calls arrive.
@@ -226,8 +226,8 @@ class ReplayBackend:
 class ContractBackend:
     """Seam for API-contract-driven mock generation. Deliberately unimplemented.
 
-    Ahmed's steer was to reuse existing tooling (WireMock/Prism-style: point at
-    the API contract, generate a mock with the same API surface, write custom
+    Reuse existing tooling (WireMock/Prism-style: point at the API contract,
+    generate a mock with the same API surface, write custom
     code behind it). That belongs behind this seam. Until it is real, asking for
     it fails loudly rather than returning a lower-fidelity stand-in that a
     reader might mistake for contract-faithful.

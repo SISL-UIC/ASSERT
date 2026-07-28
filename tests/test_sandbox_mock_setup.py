@@ -3,12 +3,12 @@
 
 """Tests for the mock setup layer.
 
-Organized around the review commitments the layer exists to satisfy:
+Organized around the product commitments the layer exists to satisfy:
 
-  Liam   - declare mocks in YAML, no code/Dockerfile edits
-  Liam   - per-use-case mocks ("these inputs -> this response"), not just a mock DB
-  Ahmed  - state across mocked calls; simulated failures; modular backends
-  Q5     - separate modular mock file, distinct from the enforcement policy
+  - declare mocks in YAML, no code/Dockerfile edits
+  - per-use-case mocks ("these inputs -> this response"), not just a mock DB
+  - state across mocked calls; simulated failures; modular backends
+  - separate modular mock file, distinct from the enforcement policy
 
 Plus the invariant that makes the split safe: the mock file supplies content for
 calls the policy already decided to mock, and can never change that decision.
@@ -42,7 +42,7 @@ def _never_executes(_args):
     raise AssertionError("the real tool must not run for a mocked call")
 
 
-# --- Liam: per-use-case mocks -------------------------------------------------
+# --- per-use-case mocks -------------------------------------------------------
 
 
 def test_argument_matchers_select_the_use_case():
@@ -127,12 +127,11 @@ def test_malformed_matcher_fails_loudly():
         match_value("not-a-number", {"gt": 1})
 
 
-# --- Ahmed: state across mocked calls -----------------------------------------
+# --- state across mocked calls ------------------------------------------------
 
 
 def test_later_read_reflects_a_mocked_write():
-    """The load-bearing question from the design review: mock a state-changing
-    call, and a later read of that state must agree with it."""
+    """If a state-changing call is mocked, a later read must agree with it."""
     library = MockLibrary.from_dict({
         "mocks": [
             {"tool": "get_line_status", "scenario": "line_restoration", "when_state": "resumed",
@@ -195,8 +194,8 @@ def test_reset_clears_scenario_state_between_cases():
 
 
 def test_simulated_failure_is_still_a_mock_not_a_fourth_mode():
-    """Ahmed asked for mimic-failure. A simulated failure surfaces as an error to
-    the agent, but the real tool still did not run and the mode is still `mock`."""
+    """A simulated failure surfaces as an error to the agent, but the real tool
+    still did not run and the mode is still `mock`."""
     library = MockLibrary.from_dict({
         "mocks": [{"tool": "apply_bill_credit", "error": {"code": "DOWNSTREAM_TIMEOUT"}}]
     })

@@ -3,10 +3,9 @@
 
 """The separate, modular mock file.
 
-The design review confirmed the next slice as: point ASSERT at a container or
-endpoint, declare the tool calls and scenarios to mock in a **separate modular
-YAML** (ASSERT already uses separate YAMLs for separate concerns), start the
-sandbox, get eval results back.
+The setup flow points ASSERT at a container or endpoint, declares the tool calls
+and scenarios to mock in a **separate modular YAML**, starts the sandbox, and
+returns eval results.
 
 This module owns that file. It is deliberately *not* the enforcement policy:
 

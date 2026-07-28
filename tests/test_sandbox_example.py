@@ -39,7 +39,7 @@ def test_validate_reports_no_policy_mock_gaps():
 
 
 def test_internal_mutation_runs_against_disposable_state_and_later_read_agrees(setup):
-    """Option B: internal state changes execute against disposable state.
+    """Internal state changes execute against disposable state.
 
     ASSERT's vendored integration is framework-neutral, so this test supplies a
     tiny in-memory disposable backend. The real telecom container resets its JSON

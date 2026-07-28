@@ -3,9 +3,9 @@
 
 """One-call setup for an ASSERT run: target + policy + mocks.
 
-The design review's confirmed slice reads, in order: point ASSERT at a container
-or endpoint, declare the tool calls and scenarios to mock in a separate modular
-YAML, ASSERT starts the sandbox, ASSERT returns eval results.
+The setup flow reads, in order: point ASSERT at a container or endpoint, declare
+the tool calls and scenarios to mock in a separate modular YAML, start the
+sandbox, and return eval results.
 
 This module owns the first three. It exists because standing the layer up today
 touches three jobs and only one of them is eval work:
@@ -26,8 +26,7 @@ the setup file is the whole of A and B:
     mocks: ./mocks.yaml         # fidelity: what a mocked call returns
     cassettes: ./cassettes      # optional
 
-Nothing here edits application code or a Dockerfile, which was Liam's stated
-requirement for mock setup.
+Nothing here edits application code or a Dockerfile.
 """
 from __future__ import annotations
 

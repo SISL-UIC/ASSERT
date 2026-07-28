@@ -3,8 +3,8 @@
 
 """Argument matching for per-use-case mocks.
 
-Liam's design-review ask was that a user declare mocks for *individual use cases*
-("these are my inputs -> this is the response"), not only a whole mock database.
+Users need to declare mocks for *individual use cases* ("these are my inputs ->
+this is the response"), not only a whole mock database.
 That requires matching on tool *arguments*, not just the tool name, which is all
 the enforcement policy needs.
 
