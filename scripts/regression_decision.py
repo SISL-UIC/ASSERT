@@ -1,8 +1,8 @@
 """Paired statistical decision for the regression workflow.
 
 Both permissibility-split policy-violation metrics are binary per test case.
-The gate runs a one-sided exact McNemar test for degradation on each metric,
-then applies Holm-Bonferroni across those regression p-values.
+The gate runs a one-sided exact McNemar test for degradation on each metric
+and evaluates each result independently at the configured significance level.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from scripts.regression_metrics import (
     metric_to_jsonable,
 )
 
-DEFAULT_ALPHA = 0.01
+DEFAULT_ALPHA = 0.10
 
 DEFAULT_MDE: dict[str, float] = {name: 0.05 for name in CANONICAL_METRICS}
 
@@ -103,19 +103,6 @@ def mcnemar_one_sided(b: int, c: int, *, treatment_higher: bool) -> float:
     return _binom_sf(c if treatment_higher else b, n, 0.5)
 
 
-def holm_bonferroni(p_values: list[float], alpha: float) -> list[bool]:
-    """Return Holm step-down rejection decisions in input order."""
-    indexed = sorted(enumerate(p_values), key=lambda item: item[1])
-    reject = [False] * len(p_values)
-    for rank, (original_index, p_value) in enumerate(indexed):
-        threshold = alpha / max(1, len(p_values) - rank)
-        if p_value <= threshold:
-            reject[original_index] = True
-        else:
-            break
-    return reject
-
-
 def _classify_effect(
     *,
     direction: str | None,
@@ -138,9 +125,9 @@ def _classify_effect(
         return EFFECT_INFO
     if abs(mean_diff) < mde:
         return EFFECT_INCONCLUSIVE
-    if regressed and regression_p_value <= alpha:
+    if regressed and regression_p_value < alpha:
         return EFFECT_DEGRADED
-    if improved and improvement_p_value <= alpha:
+    if improved and improvement_p_value < alpha:
         return EFFECT_IMPROVED
     return EFFECT_INCONCLUSIVE
 
@@ -255,7 +242,7 @@ def decide(
     directions_override: dict[str, str | None] | None = None,
     test_set_size: int | None = None,
 ) -> dict[str, Any]:
-    """Run paired comparisons, Holm correction, and the gate decision."""
+    """Run paired comparisons and evaluate each metric independently."""
     mdes = {**DEFAULT_MDE, **(mdes or {})}
     directions = {**DIRECTIONS, **(directions_override or {})}
 
@@ -276,38 +263,17 @@ def decide(
             )
         )
 
-    rejected = holm_bonferroni(
-        [
-            comparison.p_value
-            if comparison.p_value is not None
-            else 1.0
-            for comparison in comparisons
-        ],
-        alpha,
-    )
-    for comparison, holm_rejected in zip(comparisons, rejected):
-        comparison.detail["holm_rejected"] = holm_rejected
-
     decision = DECISION_PASS
     reasons: list[str] = []
     for comparison in comparisons:
         mde = mdes[comparison.name]
         if comparison.effect == EFFECT_DEGRADED:
-            if comparison.detail["holm_rejected"]:
-                decision = DECISION_BLOCK
-                reasons.append(
-                    f"{comparison.name}: degraded by {comparison.mean_diff:+.4f} "
-                    f"(regression p={comparison.p_value:.4f}, "
-                    f"n={comparison.n_pairs}, Holm-rejected)"
-                )
-            else:
-                if decision == DECISION_PASS:
-                    decision = DECISION_WARN
-                reasons.append(
-                    f"{comparison.name}: negative trend "
-                    f"delta={comparison.mean_diff:+.4f}, but regression "
-                    f"p={comparison.p_value:.4f} was not rejected by Holm"
-                )
+            decision = DECISION_BLOCK
+            reasons.append(
+                f"{comparison.name}: degraded by {comparison.mean_diff:+.4f} "
+                f"(regression p={comparison.p_value:.4f} < "
+                f"alpha={alpha:.2f}, n={comparison.n_pairs})"
+            )
         elif comparison.effect == EFFECT_TOO_FEW:
             if decision == DECISION_PASS:
                 decision = DECISION_WARN
@@ -372,6 +338,5 @@ __all__ = [
     "MetricComparison",
     "compare_per_test_case_binary",
     "decide",
-    "holm_bonferroni",
     "mcnemar_one_sided",
 ]

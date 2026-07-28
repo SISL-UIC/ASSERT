@@ -3,7 +3,7 @@
 # Runs the pipeline at the PR's base + head SHAs against both golden failure-mode
 # configs (safety + quality), computes policy-violation rates separately for
 # relevant permissible and non-permissible behaviors, runs paired McNemar
-# tests, and gates with Holm-Bonferroni-corrected significance.
+# tests, and evaluates each metric independently at p < 0.10.
 #
 # Phased rollout
 # --------------

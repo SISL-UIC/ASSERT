@@ -1,4 +1,4 @@
-"""Unit tests for paired McNemar and Holm-Bonferroni gate decisions."""
+"""Unit tests for paired McNemar gate decisions."""
 
 from __future__ import annotations
 
@@ -59,26 +59,6 @@ class McNemarTest(unittest.TestCase):
         )
 
 
-class HolmBonferroniTest(unittest.TestCase):
-    def test_all_pass(self) -> None:
-        self.assertEqual(
-            rd.holm_bonferroni([0.04, 0.05], alpha=0.01),
-            [False, False],
-        )
-
-    def test_one_strongly_significant(self) -> None:
-        self.assertEqual(
-            rd.holm_bonferroni([0.001, 0.5], alpha=0.01),
-            [True, False],
-        )
-
-    def test_step_down_stops_after_first_non_rejection(self) -> None:
-        self.assertEqual(
-            rd.holm_bonferroni([0.006, 0.007], alpha=0.01),
-            [False, False],
-        )
-
-
 class ComparePerTestCaseBinaryTest(unittest.TestCase):
     def test_records_discordants_and_common_pairs(self) -> None:
         comparison = rd.compare_per_test_case_binary(
@@ -92,7 +72,7 @@ class ComparePerTestCaseBinaryTest(unittest.TestCase):
                 {"s1": 1, "s2": 0, "s3": 1, "treatment-only": 1},
             ),
             direction="lower_is_better",
-            alpha=0.01,
+            alpha=rd.DEFAULT_ALPHA,
             mde=0.05,
         )
 
@@ -114,7 +94,7 @@ class ComparePerTestCaseBinaryTest(unittest.TestCase):
             _metric(rm.PERMISSIBLE_POLICY_VIOLATION_RATE, baseline),
             _metric(rm.PERMISSIBLE_POLICY_VIOLATION_RATE, treatment),
             direction="lower_is_better",
-            alpha=0.01,
+            alpha=rd.DEFAULT_ALPHA,
             mde=0.05,
         )
 
@@ -137,7 +117,7 @@ class ComparePerTestCaseBinaryTest(unittest.TestCase):
             _metric(rm.PERMISSIBLE_POLICY_VIOLATION_RATE, baseline),
             _metric(rm.PERMISSIBLE_POLICY_VIOLATION_RATE, treatment),
             direction="lower_is_better",
-            alpha=0.01,
+            alpha=rd.DEFAULT_ALPHA,
             mde=0.05,
         )
 
@@ -147,6 +127,9 @@ class ComparePerTestCaseBinaryTest(unittest.TestCase):
 
 
 class DecideTest(unittest.TestCase):
+    def test_default_alpha_is_point_one(self) -> None:
+        self.assertEqual(rd.DEFAULT_ALPHA, 0.10)
+
     def test_no_change_passes(self) -> None:
         baseline, treatment = _build_pair()
 
@@ -196,21 +179,45 @@ class DecideTest(unittest.TestCase):
             )
         )
 
-    def test_holm_protects_against_one_borderline_regression(self) -> None:
-        baseline, treatment = _build_pair()
+    def test_p_below_point_one_blocks_at_pr_sample_size(self) -> None:
+        baseline, treatment = _build_pair(n=20)
         treatment[rm.PERMISSIBLE_POLICY_VIOLATION_RATE] = _metric(
             rm.PERMISSIBLE_POLICY_VIOLATION_RATE,
             {
-                test_case_id: int(index < 7)
-                for index, test_case_id in enumerate(_zero_values(100))
+                test_case_id: int(index < 4)
+                for index, test_case_id in enumerate(_zero_values(20))
             },
         )
 
         report = rd.decide(
             baseline,
             treatment,
-            test_set_size=100,
-            alpha=0.01,
+            test_set_size=20,
+        )
+
+        self.assertEqual(report["decision"]["decision"], rd.DECISION_BLOCK)
+        permissible = next(
+            result
+            for result in report["results"]
+            if result["metric_name"] == rm.PERMISSIBLE_POLICY_VIOLATION_RATE
+        )
+        self.assertEqual(permissible["effect"], rd.EFFECT_DEGRADED)
+        self.assertEqual(permissible["p_value"], 0.0625)
+
+    def test_p_above_point_one_only_warns(self) -> None:
+        baseline, treatment = _build_pair(n=20)
+        treatment[rm.PERMISSIBLE_POLICY_VIOLATION_RATE] = _metric(
+            rm.PERMISSIBLE_POLICY_VIOLATION_RATE,
+            {
+                test_case_id: int(index < 3)
+                for index, test_case_id in enumerate(_zero_values(20))
+            },
+        )
+
+        report = rd.decide(
+            baseline,
+            treatment,
+            test_set_size=20,
         )
 
         self.assertEqual(report["decision"]["decision"], rd.DECISION_WARN)
@@ -219,47 +226,8 @@ class DecideTest(unittest.TestCase):
             for result in report["results"]
             if result["metric_name"] == rm.PERMISSIBLE_POLICY_VIOLATION_RATE
         )
-        self.assertEqual(permissible["effect"], rd.EFFECT_DEGRADED)
-        self.assertFalse(permissible["detail"]["holm_rejected"])
-
-    def test_improvement_does_not_relax_holm_for_other_metric(self) -> None:
-        baseline, treatment = _build_pair()
-        baseline[rm.PERMISSIBLE_POLICY_VIOLATION_RATE] = _metric(
-            rm.PERMISSIBLE_POLICY_VIOLATION_RATE,
-            {
-                test_case_id: int(index < 20)
-                for index, test_case_id in enumerate(_zero_values(100))
-            },
-        )
-        treatment[rm.NOT_PERMISSIBLE_POLICY_VIOLATION_RATE] = _metric(
-            rm.NOT_PERMISSIBLE_POLICY_VIOLATION_RATE,
-            {
-                test_case_id: int(index < 7)
-                for index, test_case_id in enumerate(_zero_values(100))
-            },
-        )
-
-        report = rd.decide(
-            baseline,
-            treatment,
-            test_set_size=100,
-            alpha=0.01,
-        )
-
-        self.assertNotEqual(report["decision"]["decision"], rd.DECISION_BLOCK)
-        results = {
-            result["metric_name"]: result
-            for result in report["results"]
-        }
-        self.assertEqual(
-            results[rm.PERMISSIBLE_POLICY_VIOLATION_RATE]["p_value"],
-            1.0,
-        )
-        self.assertFalse(
-            results[rm.NOT_PERMISSIBLE_POLICY_VIOLATION_RATE]["detail"][
-                "holm_rejected"
-            ]
-        )
+        self.assertEqual(permissible["effect"], rd.EFFECT_INCONCLUSIVE)
+        self.assertEqual(permissible["p_value"], 0.125)
 
 
 if __name__ == "__main__":

@@ -3,9 +3,8 @@
 Runs the pipeline at the baseline + treatment commits against the two
 golden failure-mode configs (``tests/regression/config_{safety,quality}.yaml``) with
 a shared test-set size, computes policy-violation rates for relevant permissible
-and non-permissible behaviors, runs paired McNemar tests, and emits a
-Holm-Bonferroni-gated decision report consumed by the ``science.yml`` workflow's
-PR summary step.
+and non-permissible behaviors, runs paired McNemar tests, and emits a per-metric
+decision report consumed by the ``science.yml`` workflow's PR summary step.
 
 Determinism contract
 --------------------
@@ -129,7 +128,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--alpha",
         type=float,
         default=DEFAULT_ALPHA,
-        help="Per-test significance level for the gate",
+        help="Per-metric significance level for the gate",
     )
     p.add_argument(
         "--judge-model",
@@ -536,23 +535,21 @@ def render_markdown(report: dict[str, Any]) -> str:
     lines.append(f"## 🧪 Regression Test — {_ICONS.get(decision, '?')} {decision}")
     lines.append("")
     lines.append(
-        f"family-wise alpha = {report['alpha']}, "
+        f"per-metric alpha = {report['alpha']}, "
         f"test_set_size = {report.get('test_set_size')}"
     )
     lines.append("")
     lines.append(
         "| Config | Metric | Granularity | Direction | Baseline | Treatment | "
-        "Δ | Regression p | Holm reject | Effect |"
+        "Δ | Regression p | Effect |"
     )
-    lines.append("|---|---|---|---|---|---|---|---|---|---|")
+    lines.append("|---|---|---|---|---|---|---|---|---|")
     for r in report["results"]:
-        holm_rejected = r.get("detail", {}).get("holm_rejected") is True
         lines.append(
             f"| {r['config']} | {r['metric_name']} | {r['granularity']} | "
             f"{r['direction'] or '—'} | "
             f"{_fmt(r['baseline_value'])} | {_fmt(r['treatment_value'])} | "
             f"{_fmt(r['mean_diff'])} | {_fmt(r['p_value'])} | "
-            f"{'yes' if holm_rejected else 'no'} | "
             f"{_ICONS.get(r['effect'], '?')} {r['effect']} |"
         )
     lines.append("")
