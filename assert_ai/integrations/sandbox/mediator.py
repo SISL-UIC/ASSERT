@@ -76,7 +76,8 @@ class ActionMediator:
         mocks: Any | None = None,
     ) -> None:
         """
-        `mocks` is an optional `MockLibrary` (see `sandbox_action_mediation.mocks`).
+        `mocks` is an optional `MockLibrary` from this package's `.mocks`
+        subpackage.
 
         When supplied, it is consulted FIRST for any call the policy decided to
         mock, so mock content lives in its own modular file instead of inline in

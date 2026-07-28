@@ -21,7 +21,7 @@ import sys
 from pathlib import Path
 
 from .mocks import MockCall
-from .setup import SetupError, load_setup, validate_setup
+from .mediation_setup import SetupError, load_setup, validate_setup
 
 
 def _cmd_validate(args: argparse.Namespace) -> int:
