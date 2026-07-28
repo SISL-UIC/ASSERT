@@ -21,6 +21,8 @@ reported explicitly in runtime metadata.
 from __future__ import annotations
 
 import base64
+import http.client
+import ipaddress
 import json
 import logging
 import os
@@ -116,6 +118,24 @@ def _read_jsonl(path: Path, start: int = 0) -> tuple[list[dict[str, Any]], int]:
     return rows, len(lines)
 
 
+def _resolve_public_ip(host: str) -> str:
+    """Resolve once and return a globally routable address.
+
+    Connecting to this returned address, rather than resolving the hostname a
+    second time in the HTTP client, closes the DNS-rebinding window between
+    validation and connection.
+    """
+    try:
+        addresses = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+    except socket.gaierror as exc:
+        raise ValueError(f"cannot resolve egress host {host!r}") from exc
+    for _family, _kind, _proto, _canonname, sockaddr in addresses:
+        address = ipaddress.ip_address(sockaddr[0])
+        if address.is_global:
+            return str(address)
+    raise ValueError(f"egress host {host!r} does not resolve to a public address")
+
+
 # ---------------------------------------------------------------------------
 # Deny-by-default egress audit proxy
 # ---------------------------------------------------------------------------
@@ -188,7 +208,11 @@ class _EgressHandler(BaseHTTPRequestHandler):
             # loopback, private/link-local ranges, and metadata endpoints before
             # the host process makes the request.
             validate_endpoint_url(self.path)
+            resolved_ip = _resolve_public_ip(host)
         except ValueError:
+            self._deny(host, port, method, path)
+            return
+        if parsed.scheme != "http":
             self._deny(host, port, method, path)
             return
         self._record(host, port, method, path, "allowed")
@@ -201,21 +225,23 @@ class _EgressHandler(BaseHTTPRequestHandler):
                 "proxy-authorization", "proxy-connection", "connection", "keep-alive"
             }
         }
-        request = urllib.request.Request(self.path, data=body, headers=headers, method=method)
+        request_path = path
+        if parsed.query:
+            request_path += f"?{parsed.query}"
+        headers["host"] = host if port == 80 else f"{host}:{port}"
+        connection = http.client.HTTPConnection(resolved_ip, port, timeout=30)
         try:
-            # Exact-host policy and ASSERT's SSRF validator constrain this URL.
-            with urllib.request.urlopen(request, timeout=30) as response:  # noqa: S310  # lgtm[py/full-ssrf]
-                raw = response.read()
-                status = response.status
-                content_type = response.headers.get("content-type", "application/octet-stream")
-        except urllib.error.HTTPError as exc:
-            raw = exc.read()
-            status = exc.code
-            content_type = exc.headers.get("content-type", "application/octet-stream")
+            connection.request(method, request_path, body=body, headers=headers)
+            response = connection.getresponse()
+            raw = response.read()
+            status = response.status
+            content_type = response.headers.get("content-type", "application/octet-stream")
         except Exception as exc:  # noqa: BLE001
             raw = json.dumps({"error": "upstream_failed", "detail": str(exc)}).encode()
             status = 502
             content_type = "application/json"
+        finally:
+            connection.close()
         self.send_response(status)
         self.send_header("content-type", content_type)
         self.send_header("content-length", str(len(raw)))
@@ -238,12 +264,13 @@ class _EgressHandler(BaseHTTPRequestHandler):
             return
         try:
             validate_endpoint_url(f"https://{host}:{port}/")
+            resolved_ip = _resolve_public_ip(host)
         except ValueError:
             self._deny(host, port, "CONNECT", "")
             return
         self._record(host, port, "CONNECT", "", "allowed")
         try:
-            upstream = socket.create_connection((host, port), timeout=30)
+            upstream = socket.create_connection((resolved_ip, port), timeout=30)
         except OSError:
             self.send_response(502)
             self.send_header("connection", "close")

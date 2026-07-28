@@ -316,6 +316,7 @@ def test_model_proxy_requires_synthetic_token_and_injects_real_key_host_side(mon
 def test_egress_proxy_requires_synthetic_auth_and_does_not_forward_it(tmp_path, monkeypatch):
     seen: dict[str, str | None] = {}
     monkeypatch.setattr(sandbox_runtime, "validate_endpoint_url", lambda url: None)
+    monkeypatch.setattr(sandbox_runtime, "_resolve_public_ip", lambda host: "127.0.0.1")
 
     class Upstream(BaseHTTPRequestHandler):
         def log_message(self, format, *args): pass
