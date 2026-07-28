@@ -640,8 +640,10 @@ class HTTPEndpointSession:
     """Invokes an HTTP endpoint as the eval target.
 
     POST {"message": text, "history": [...]} to the URL.
-    Expects {"response": "..."} back.
-    Same black-box visibility as CallableSession.
+    Expects {"response": "..."} back. An endpoint may also return adapter-shaped
+    top-level ``events``; when present, tool calls/results become first-class
+    judge-visible interaction messages rather than opaque response metadata.
+    Without events, this has the same black-box visibility as CallableSession.
     """
 
     def __init__(
@@ -707,7 +709,19 @@ class HTTPEndpointSession:
             ) as resp:
                 resp.raise_for_status()
                 data = await resp.json()
-                response_text = data.get("response", "")
+                if not isinstance(data, dict):
+                    raise RuntimeError(
+                        f"HTTP endpoint {self._endpoint} returned a non-object JSON response"
+                    )
+                response = _normalize_connector_response({
+                    "text": data.get("response", data.get("text", "")),
+                    "events": data.get("events"),
+                    # Do not persist the complete endpoint payload: it may carry
+                    # backend diagnostics or sensitive data. Preserve only the
+                    # endpoint identity; normalized event content is retained
+                    # explicitly below.
+                    "raw": {"endpoint": self._endpoint},
+                })
         except aiohttp.ClientResponseError as exc:
             raise RuntimeError(
                 f"HTTP endpoint {self._endpoint} returned status {exc.status}: {exc.message}"
@@ -718,18 +732,17 @@ class HTTPEndpointSession:
             ) from exc
 
         # Sanitize response text to prevent credential leakage into artifacts
-        response_text = _sanitize_response_text(response_text)
-
-        interaction_messages = [
-            {"role": "user", "content": user_text},
-            {"role": "assistant", "content": response_text},
-        ]
+        response.text = _sanitize_response_text(response.text)
+        interaction_messages = _serialize_connector_interaction_messages(
+            user_text=user_text,
+            response=response,
+        )
 
         return TurnResult(
-            text=response_text,
-            state_messages=list(messages) + [Message(role="assistant", content=response_text)],
+            text=response.text,
+            state_messages=list(messages) + [Message(role="assistant", content=response.text)],
             interaction_messages=interaction_messages,
-            raw={"endpoint": self._endpoint},
+            raw=response.raw,
         )
 
 
@@ -921,9 +934,12 @@ def _serialize_connector_interaction_messages(
         }
     ]
     if response.events:
+        final_assistant_seen = False
         for event in response.events:
             if event.role == "assistant":
                 messages.append({"role": "assistant", "content": event.content, "raw": response.raw})
+                if event.content == response.text:
+                    final_assistant_seen = True
             elif event.role == "tool_call":
                 messages.append(
                     {
@@ -950,6 +966,11 @@ def _serialize_connector_interaction_messages(
                         "raw": response.raw,
                     }
                 )
+        # Tool-evidence endpoints commonly return only tool_call/tool_result
+        # events plus a top-level final response. Preserve that final response
+        # exactly once so evidence enrichment never removes the answer itself.
+        if not final_assistant_seen:
+            messages.append({"role": "assistant", "content": response.text, "raw": response.raw})
         return messages
 
     messages.append({"role": "assistant", "content": response.text, "raw": response.raw})

@@ -142,4 +142,30 @@ pipeline:
       endpoint: https://my-agent.internal/chat
 ```
 
-The runtime POSTs `{"message": "...", "history": [...]}` (same `history` shape as above) and expects `{"response": "..."}` back. Same black-box visibility as a plain string-returning callable. Requires [`aiohttp`](https://github.com/aio-libs/aiohttp) (`pip install aiohttp`).
+The runtime POSTs `{"message": "...", "history": [...]}` (same `history` shape as above) and expects `{"response": "..."}` back. Requires [`aiohttp`](https://github.com/aio-libs/aiohttp) (`pip install aiohttp`).
+
+For black-box services, that response text is all the judge sees. An instrumented endpoint can additionally return top-level adapter-shaped `events` so tool calls, tool results, and mediation outcomes become first-class judge evidence:
+
+```json
+{
+  "response": "The line is restored.",
+  "events": [
+    {
+      "role": "tool_call",
+      "tool_name": "resume_line",
+      "tool_args": {"line_id": "L1002"},
+      "tool_call_id": "tc-1",
+      "content": ""
+    },
+    {
+      "role": "tool_result",
+      "tool_name": "resume_line",
+      "tool_args": {"line_id": "L1002"},
+      "tool_call_id": "tc-1",
+      "content": "{\"mode\":\"pass\",\"real_executed\":true}"
+    }
+  ]
+}
+```
+
+This is the recommended HTTP shape for a sandboxed or mediated agent: the agent owns its real tool loop, the endpoint controls execution, and ASSERT receives the ordered action evidence through its existing transcript event stream.
