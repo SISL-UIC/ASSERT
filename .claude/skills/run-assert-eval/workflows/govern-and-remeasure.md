@@ -318,6 +318,77 @@ the literal document handed to Rego. Delete the throwaway probe afterward
 (never leave debug scripts under `artifacts/`).
 
 
+## Step 2b — Author the runtime annotator dispatcher in `agent_guarded.py`
+
+**Applies only to semantic (annotator-based) gates — Shape 4/5.** Structural gates
+skip this step entirely.
+
+The manifest `annotators:` block (Step 2a) only *declares and configures* an
+annotator; it does not run one. **ACS ships no built-in LLM annotator executor** —
+the native runtime invokes a **host-owned** callback instead. In the SDK,
+`AnnotatorDispatcher` is a `Protocol` documented as *"Host-owned annotator hook
+invoked synchronously by the native runtime"* (`agent_control_specification/_client.py`),
+with a single method:
+
+```python
+def dispatch(
+    self,
+    annotator_name: str,
+    annotator_config: Mapping[str, JsonValue],   # the manifest annotator entry (e.g. {"type": "llm"})
+    preliminary_policy_input: Mapping[str, JsonValue],  # includes the bound $policy_target
+) -> JsonValue: ...                              # value exposed at input.annotations.<annotator_name>
+```
+
+So for every semantic gate you MUST supply this runtime half in `agent_guarded.py`.
+`assert-ai acs generate` authors the manifest + Rego (the *declaration*); it does NOT
+author the dispatcher (the *execution*). Author it as follows:
+
+1. **Name-match contract — identical in three places, or the gate silently no-ops.**
+   The annotator NAME must be the same string in (a) the manifest `annotators:` key
+   and per-point `annotations:` mapping, (b) the Rego condition
+   `input.annotations.<name>`, and (c) the branch your `dispatch()` keys on
+   (`if annotator_name == "<name>"`). A mismatch means `input.annotations.<name>` is
+   never populated → the `== true` rule fails OPEN → the bad event passes through.
+
+2. **Return the shape the generated rule reads.** An `llm` annotator returns a
+   **bool** consumed as `input.annotations.<name> == true`; a `classifier` annotator
+   returns an object whose labels the rule reads as
+   `input.annotations.<name>.<label>`. Match whatever the committed Rego checks.
+
+3. **Run the judgment over the right evidence — calibrate to the ASSERT judge, not
+   the agent.** Build the annotator's LLM call from the `preliminary_policy_input`
+   (the bound `$policy_target`) plus the **user's turns / conversation history** — the
+   same evidence the judge scores. Do NOT condition on the agent's own signal (a
+   `verified` flag it set, a tool it happened to call); a self-signal is strictly
+   weaker than the judge and under-fires. (See Step 5a for the calibration failure
+   modes and the multi-turn `history` fix.)
+
+4. **Fail OPEN on annotator error (return "allow"/`False`).** A raised exception or a
+   model timeout should not hard-block — that spikes `overrefusal`. Failing open
+   matches the `== true` default and keeps the A/B honest; a missed catch shows up as
+   residual bad-event rate, which is the safer direction to debug.
+
+5. **Wire the dispatcher into the control**, then gate on it:
+   ```python
+   from agent_control_specification import AgentControl
+   _CONTROL = AgentControl.from_path(str(manifest), _MyAnnotator())   # dispatcher is the 2nd arg
+   ```
+   `agent_guarded.py` imports the baseline from `agent.py` unchanged and adds ONLY
+   this gate (plus any regenerate-and-re-gate remediation), so the A/B differs by
+   nothing but enforcement.
+
+**Reference template:** `examples/science_research_agent/agent_guarded.py`
+(`_LeakageAnnotator.dispatch` runs an LLM disclosure check over the reply and returns
+a bool at `input.annotations.restricted_disclosure_classifier`; wired via
+`AgentControl.from_path(manifest, _LeakageAnnotator())`). For a *structural* gate the
+equivalent host-side seam is `_policy_target_args` in
+`examples/billing_support_agent/agent_guarded.py` (Step 2a), not a dispatcher.
+
+**On a deny, don't stop at a flat refusal** — regenerate an in-policy answer and
+**re-gate** it, or `overrefusal` rises. That remediation (and how to tune the
+annotator when the rate doesn't drop) is Step 5a.
+
+
 ## Step 3 — Validate the policy against known-bad findings
 
 ```
