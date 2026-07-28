@@ -31,18 +31,46 @@ def test_shipped_example_loads(setup):
     assert setup.mocks.rules
 
 
-def test_validate_reports_the_known_state_gap():
-    """The example ships a documented inconsistency: `resume_line` is mocked so it
-    never writes the DB, but `get_line_status` is passed and reads that same
-    untouched DB. The scenario rule that would reconcile them is therefore inert.
-
-    This is pinned deliberately. If someone closes the loop (by mocking
-    get_line_status, or by giving resume_line a disposable backend), this test
-    fails and forces the mocks.yaml comment to be updated with it, rather than
-    leaving stale guidance in the shipped example.
-    """
+def test_validate_reports_no_policy_mock_gaps():
+    """The shipped policy and mock file agree on every mocked tool."""
     summary = validate_setup(EXAMPLE)
-    assert summary["unused_mock_rules"] == ["get_line_status"]
+    assert summary["unused_mock_rules"] == []
+    assert summary["falls_back_to_inline"] == []
+
+
+def test_internal_mutation_runs_against_disposable_state_and_later_read_agrees(setup):
+    """Option B: internal state changes execute against disposable state.
+
+    ASSERT's vendored integration is framework-neutral, so this test supplies a
+    tiny in-memory disposable backend. The real telecom container resets its JSON
+    DB from a pristine snapshot before every case; the property being pinned here
+    is the same one: the write really happens, the later read sees it, and both
+    calls remain judge-visible.
+    """
+    state = {"status": "suspended", "service_status": "no_service"}
+
+    def resume(_args):
+        state.update(status="active", service_status="connected")
+        return {"status": "resumed", "service_status": "connected"}
+
+    def read(_args):
+        return {"status": "ok", "line": dict(state)}
+
+    host = setup.tool_host(
+        tools={"resume_line": resume, "get_line_status": read},
+        agent_id="telecom-support-agent",
+        session_id="test-run",
+    )
+    result = host.call_tool("resume_line", {"line_id": "L1002"})
+    status = host.call_tool("get_line_status", {"line_id": "L1002"})
+
+    assert result == {"status": "resumed", "service_status": "connected"}
+    assert status["line"] == {"status": "active", "service_status": "connected"}
+    resume_record, read_record = host.records
+    assert resume_record.decision.mode == "pass"
+    assert resume_record.decision.real_executed is True
+    assert resume_record.decision.flagged is False
+    assert read_record.decision.mode == "pass"
 
 
 def test_risky_call_is_mocked_and_never_executes(setup):

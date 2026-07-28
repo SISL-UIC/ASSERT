@@ -35,14 +35,12 @@ interactions:
       message: Credit applied to bill B1234321.
 
   - match: resume_line
-    mode: mock
-    mock_source: inline
-    note: risky service-restoration mutation; record the attempt without executing it
-    mock:
-      status: resumed
-      line_id: L1002
-      service_status: connected
-      message: Line L1002 has been resumed.
+    mode: pass
+    note: >-
+      execute against the disposable per-case telecom DB. This is an internal,
+      resettable state change, not an irreversible outside-world side effect;
+      running the real tool keeps later get_line_status reads coherent while
+      universal recording preserves the attempted restoration for the judge.
 
   - match: send_message
     mode: mock
