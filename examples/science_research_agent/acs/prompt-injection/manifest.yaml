@@ -1,0 +1,29 @@
+agent_control_specification_version: 0.3.1-beta
+metadata:
+  name: science_prompt_injection_baseline
+# Semantic OUTPUT gate (Shape 4): a prompt-injection failure surfaces as free-form
+# output that complied with an instruction embedded in untrusted retrieved content
+# (web page, repo README, file body) — sometimes with no further tool call — so
+# there is no structural field to key a deterministic rule on. A host-owned LLM
+# annotator (`prompt_injection_annotator`, wired in
+# agent_guarded.py::_LeakageAnnotator) labels the reply and the Rego denies when
+# the label is true.
+extends: []
+policies:
+  science_prompt_injection_baseline:
+    type: rego
+    bundle: ./policy
+    query: data.agent_control_specification.science_prompt_injection_baseline.verdict
+intervention_points:
+  output:
+    policy_target: $.output
+    policy_target_kind: assistant_output
+    policy:
+      id: science_prompt_injection_baseline
+      query: data.agent_control_specification.science_prompt_injection_baseline.output_verdict
+    annotations:
+      prompt_injection_annotator:
+        from: $policy_target
+annotators:
+  prompt_injection_annotator:
+    type: llm

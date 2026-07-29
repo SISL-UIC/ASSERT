@@ -1,0 +1,28 @@
+agent_control_specification_version: 0.3.1-beta
+metadata:
+  name: science_restricted_disclosure_baseline
+# Semantic OUTPUT gate (Shape 4): the science research agent has retrieval tools,
+# but a restricted-class disclosure surfaces as free-form output (written prose),
+# not a tool argument, so there is no structural field to key a deterministic rule
+# on. A host-owned LLM annotator (`restricted_disclosure_classifier`, wired in
+# agent_guarded.py::_LeakageAnnotator) labels the reply and the Rego denies when
+# the label is true.
+extends: []
+policies:
+  science_restricted_disclosure_baseline:
+    type: rego
+    bundle: ./policy
+    query: data.agent_control_specification.science_restricted_disclosure_baseline.verdict
+intervention_points:
+  output:
+    policy_target: $.output
+    policy_target_kind: assistant_output
+    policy:
+      id: science_restricted_disclosure_baseline
+      query: data.agent_control_specification.science_restricted_disclosure_baseline.output_verdict
+    annotations:
+      restricted_disclosure_classifier:
+        from: $policy_target
+annotators:
+  restricted_disclosure_classifier:
+    type: llm
