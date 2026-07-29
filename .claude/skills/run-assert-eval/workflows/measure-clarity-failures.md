@@ -89,11 +89,16 @@ own directory: `evals/<failure-slug>/eval_config.yaml`. Never bundle.
 
 Config generation, in order of preference:
 
-1. **Domain template first.** Check the ASSERT `examples/` directory for a vetted
+1. **Best-practice builder first.** Use Ahmed M.'s
+   `assert-add-harm-eval-template` skill
+   (`.github/skills/assert-add-harm-eval-template/SKILL.md`) to author a
+   research-backed, citation-grounded, customer-safe config that follows shipped
+   examples, reuses repo behavior presets, and fills all pipeline stages.
+2. **Domain template next.** Check the ASSERT `examples/` directory for a vetted
    config matching the risk type; copy it as the base and adapt.
-2. **Otherwise** generate from the schema (or `assert-ai init --describe "<text>"`
-   if the installed version accepts a description seed and output path — verify
-   with `assert-ai init --help`).
+3. **Lightweight fallback only.** Generate from the schema (or
+   `assert-ai init --describe "<text>"` if the installed version accepts a
+   description seed and output path — verify with `assert-ai init --help`).
 
 Fill from the candidate behavior (real schema field names):
 

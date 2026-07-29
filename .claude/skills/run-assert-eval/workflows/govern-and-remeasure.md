@@ -145,6 +145,18 @@ policies live under `examples/billing_support_agent/acs/<slug>/` and
 `input.annotations.<classifier>.*` for semantic content. Which style you get — and
 whether it enforces — depends on what the failure conditions on:
 
+- **Decision principle: prefer deterministic structure first.** Whenever the
+  failure is decidable from a tool boundary — typed tool args/results or a trusted
+  session-state scalar injected into `input.policy_target.value.*` at
+  `pre_tool_call` / `post_tool_call` — use that deterministic structural gate
+  before reaching for an `output` / `input` annotator. Structural gates are
+  repeatable and surgical, so they block the harmful action without collaterally
+  refusing benign ones; LLM annotator gates are nondeterministic, can drift
+  run-to-run, and tend to over-fire, driving `overrefusal` up. The canonical win is
+  `examples/travel_planner_langgraph/acs/budget-overrun-typed/`: it gates on the
+  typed `validate_budget.within_budget` signal instead of a semantic output
+  annotator (see `examples/TYPED-GATE-KEEP-ANNOTATOR-RATIONALE.md`). Fall back to
+  an annotator only when no structural field exists for the judge-scored harm.
 - **Semantic / content failures** (toxicity, PII leakage, jailbreak phrasing,
   unsafe advice) — **keep the annotator-based policy.** There's no structural
   field to key on; an LLM judgment is right, and the ACS host populates
