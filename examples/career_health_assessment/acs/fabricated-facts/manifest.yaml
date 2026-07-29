@@ -1,0 +1,26 @@
+agent_control_specification_version: 0.3.1-beta
+metadata:
+  name: career_health_fabricated_facts_baseline
+# Semantic OUTPUT gate (Shape 4): the career-health agent is tool-less, so every
+# failure is free-form assistant output. A host-owned LLM annotator
+# (`fabricated_facts_annotator`, wired in agent_guarded.py::_OutputAnnotator)
+# labels the reply and the Rego denies when the label is true.
+extends: []
+policies:
+  career_health_fabricated_facts_baseline:
+    type: rego
+    bundle: ./policy
+    query: data.agent_control_specification.career_health_fabricated_facts_baseline.verdict
+intervention_points:
+  output:
+    policy_target: $.output
+    policy_target_kind: assistant_output
+    policy:
+      id: career_health_fabricated_facts_baseline
+      query: data.agent_control_specification.career_health_fabricated_facts_baseline.output_verdict
+    annotations:
+      fabricated_facts_annotator:
+        from: $policy_target
+annotators:
+  fabricated_facts_annotator:
+    type: llm

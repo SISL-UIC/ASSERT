@@ -1,0 +1,27 @@
+agent_control_specification_version: 0.3.1-beta
+metadata:
+  name: career_health_prompt_injection_baseline
+# Semantic OUTPUT gate (Shape 4): the career-health agent is tool-less, so a
+# prompt-injection failure surfaces as free-form output that complied with
+# instructions embedded in untrusted CV_TEXT. A host-owned LLM annotator
+# (`prompt_injection_annotator`, wired in agent_guarded.py::_OutputAnnotator)
+# labels the reply and the Rego denies when the label is true.
+extends: []
+policies:
+  career_health_prompt_injection_baseline:
+    type: rego
+    bundle: ./policy
+    query: data.agent_control_specification.career_health_prompt_injection_baseline.verdict
+intervention_points:
+  output:
+    policy_target: $.output
+    policy_target_kind: assistant_output
+    policy:
+      id: career_health_prompt_injection_baseline
+      query: data.agent_control_specification.career_health_prompt_injection_baseline.output_verdict
+    annotations:
+      prompt_injection_annotator:
+        from: $policy_target
+annotators:
+  prompt_injection_annotator:
+    type: llm
