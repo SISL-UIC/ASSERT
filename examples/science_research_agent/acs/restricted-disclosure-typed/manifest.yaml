@@ -1,0 +1,32 @@
+agent_control_specification_version: 0.3.1-beta
+metadata:
+  name: science_restricted_disclosure_typed
+extends: []
+# Deterministic typed tool-boundary gate for restricted disclosure. Unlike
+# ../restricted-disclosure/manifest.yaml, this declares no annotators: the Rego
+# reads file_search's typed result.classes at post_tool_call. pre_tool_call is
+# declared as default allow because protect_tool evaluates both pre and post.
+policies:
+  science_restricted_disclosure_typed:
+    type: rego
+    bundle: ./policy
+    query: data.agent_control_specification.science_restricted_disclosure_typed.verdict
+intervention_points:
+  pre_tool_call:
+    policy_target: $.tool_call.args
+    policy_target_kind: tool_args
+    policy:
+      id: science_restricted_disclosure_typed
+      query: data.agent_control_specification.science_restricted_disclosure_typed.pre_tool_call_verdict
+    tool_name_from: $.tool_call.name
+  post_tool_call:
+    policy_target: $.tool_result
+    policy_target_kind: tool_result
+    policy:
+      id: science_restricted_disclosure_typed
+      query: data.agent_control_specification.science_restricted_disclosure_typed.post_tool_call_verdict
+    tool_name_from: $.tool_call.name
+tools:
+  file_search:
+    type: Tool
+    id: file_search
