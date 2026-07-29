@@ -1,0 +1,30 @@
+{
+  "documentState": {
+    "goal/problem.md": {
+      "contentHash": "8f365859fef70873b429ccc44d4ee37343152d742e6eacf49db47debaa9b1ad1",
+      "dependencyHashes": {}
+    },
+    "goal/requirements.md": {
+      "contentHash": "a6408b5ab58a3f83ae3c98d57ebe471463ee581e33ee6682a80ce33fca6da2a5",
+      "dependencyHashes": {
+        "goal/problem.md": "8f365859fef70873b429ccc44d4ee37343152d742e6eacf49db47debaa9b1ad1"
+      }
+    },
+    "summary.md": {
+      "contentHash": "30e40f7ac4ff09e3a14a6f88ff26d88cb74171fa4e7fb4ccb038f436590fcf76",
+      "dependencyHashes": {
+        "goal/problem.md": "8f365859fef70873b429ccc44d4ee37343152d742e6eacf49db47debaa9b1ad1"
+      }
+    },
+    "solution/architecture.md": {
+      "contentHash": "1fc016a2db5a125cfcdd2b41cf1081fc9c19db97082f7d40e2bc38c34e09d57e",
+      "dependencyHashes": {}
+    },
+    "failures/failures.md": {
+      "contentHash": "6c8fa504276fd0e40abe50c89c498dfed26bd592baa439913d80a4e75ed97dab",
+      "dependencyHashes": {
+        "solution/architecture.md": "1fc016a2db5a125cfcdd2b41cf1081fc9c19db97082f7d40e2bc38c34e09d57e"
+      }
+    }
+  }
+}

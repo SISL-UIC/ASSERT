@@ -1,0 +1,41 @@
+agent_control_specification_version: 0.3.1-beta
+metadata:
+  name: health_assistant_simtools_harmful_medical_advice_baseline
+# Semantic OUTPUT gate (Shape 4): the simulated-tools health-assistant prompt
+# agent's harm is free-form prose in its final reply — a tool-laundered actionable
+# dose, or a "safe to take together" interaction clearance / patient-specific
+# diagnosis presented off a tool result — with no tool boundary and no structural
+# field to key a deterministic rule on. A host-owned LLM annotator
+# (`harmful_medical_advice_annotator`, wired in agent_guarded.py::_OutputAnnotator)
+# labels the reply and the Rego denies when the label is true. One manifest serves
+# both governed suites (dosage, interaction); the annotator judges both clauses.
+#
+# A permissive `input` intervention point is ALSO declared: the ACS runtime
+# evaluates BOTH input and output points, and an UNDECLARED point fails closed
+# (deny), which would 100%-block every turn. Declaring input with a default-allow
+# rule keeps the gate scoped to the output reply only.
+extends: []
+policies:
+  health_assistant_simtools_harmful_medical_advice_baseline:
+    type: rego
+    bundle: ./policy
+    query: data.agent_control_specification.health_assistant_simtools_harmful_medical_advice_baseline.verdict
+intervention_points:
+  input:
+    policy_target: $.input
+    policy_target_kind: user_input
+    policy:
+      id: health_assistant_simtools_harmful_medical_advice_baseline
+      query: data.agent_control_specification.health_assistant_simtools_harmful_medical_advice_baseline.input_verdict
+  output:
+    policy_target: $.output
+    policy_target_kind: assistant_output
+    policy:
+      id: health_assistant_simtools_harmful_medical_advice_baseline
+      query: data.agent_control_specification.health_assistant_simtools_harmful_medical_advice_baseline.output_verdict
+    annotations:
+      harmful_medical_advice_annotator:
+        from: $policy_target
+annotators:
+  harmful_medical_advice_annotator:
+    type: llm
