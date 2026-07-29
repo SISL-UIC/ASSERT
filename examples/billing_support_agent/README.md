@@ -27,12 +27,12 @@ Governance: **structural session-state gate** — deny the four write tools when
 
 | Metric | Baseline | Governed |
 |---|---|---|
-| bad-event (prompt) | 20% | **0%** |
-| bad-event (scenario) | 48% | **0%** |
+| not-permissible violation (prompt) | 20% | **0%** |
+| not-permissible violation (scenario) | 48% | **0%** |
 | overrefusal (prompt) | 0% | 4% |
 | overrefusal (scenario) | 8% | 20% |
 
-The bad event is eliminated on both slices. The scenario overrefusal rise is
+The not-permissible violation is eliminated on both slices. The scenario overrefusal rise is
 partly the per-call `verified` flag not persisting across replayed history turns
 (a known multi-turn subtlety), not the gate over-denying fresh verifications.
 
@@ -43,8 +43,8 @@ Governance: **structural argument (tenant-scope) gate** — deny a lookup whose
 
 | Metric | Baseline | Governed |
 |---|---|---|
-| bad-event (prompt) | 8% | **0%** |
-| bad-event (scenario) | 48% | **16%** |
+| not-permissible violation (prompt) | 8% | **0%** |
+| not-permissible violation (scenario) | 48% | **16%** |
 | overrefusal (prompt) | 0% | 0% |
 | overrefusal (scenario) | 4% | 12% |
 
@@ -72,18 +72,24 @@ $env:BILLING_AGENT_MODEL="azure/gpt-4o-mini"   # agent-under-test model
 assert-ai run --config evals/unverified-high-risk-action/eval_config.yaml
 # Govern + re-measure (default manifest = identity-gate; default guarded = high-risk tools)
 assert-ai run --config evals/unverified-high-risk-action/eval_config.governed.yaml
-assert-ai results compare billing-unverified-high-risk-action baseline acs-governed --metric unverified_high_risk_action
+# Compare the clean harm signal: not_permissible_policy_violation_rate from each run
+assert-ai results status billing-unverified-high-risk-action baseline --json
+assert-ai results status billing-unverified-high-risk-action acs-governed --json
 
 # Cross-customer: point the guarded agent at the tenant-scope policy + lookup tools
 $env:BILLING_ACS_MANIFEST="examples/billing_support_agent/acs/cross-account-scope/manifest.yaml"
 $env:BILLING_ACS_GUARDED_TOOLS="get_account_profile,get_invoices"
 assert-ai run --config evals/cross-customer-data-exposure/eval_config.yaml
 assert-ai run --config evals/cross-customer-data-exposure/eval_config.governed.yaml
-assert-ai results compare billing-cross-customer-data-exposure baseline acs-governed --metric cross_customer_data_exposure
+# Compare the clean harm signal: not_permissible_policy_violation_rate from each run
+assert-ai results status billing-cross-customer-data-exposure baseline --json
+assert-ai results status billing-cross-customer-data-exposure acs-governed --json
 ```
 
-Both evals disable the coupled built-in `policy_violation` and grade a custom,
-node-independent bad-event dimension, keeping `overrefusal` separate — a clean
-ACS before/after A/B. Provider credentials are read from the repo-root `.env`
-(reference names only: `AZURE_API_KEY`, `AZURE_API_BASE`); artifacts are
-gitignored and never committed.
+Both evals use the built-in node-based `policy_violation` and a domain-tuned
+`overrefusal`, and report the harm signal from `not_permissible_policy_violation_rate`
+— violations counted only over non-permissible taxonomy nodes (PR #276), decoupled
+from overrefusal without disabling any dimension or grading a custom bad-event
+dimension — a clean ACS before/after A/B. Provider credentials are read from the
+repo-root `.env` (reference names only: `AZURE_API_KEY`, `AZURE_API_BASE`); artifacts
+are gitignored and never committed.

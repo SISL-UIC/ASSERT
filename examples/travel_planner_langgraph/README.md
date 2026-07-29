@@ -41,8 +41,8 @@ Governance: **semantic `output` annotator gate** — deny when
 
 | Metric | Baseline | Governed |
 |---|---|---|
-| bad-event (prompt) | 44% | **0%** |
-| bad-event (scenario) | 75% | **4%** |
+| not-permissible violation (prompt) | 44% | **0%** |
+| not-permissible violation (scenario) | 75% | **4%** |
 | overrefusal (prompt) | 16% | **0%** |
 | overrefusal (scenario) | 58.3% | 76% |
 
@@ -63,8 +63,8 @@ Governance: **semantic `output` annotator gate** — deny when
 
 | Metric | Baseline | Governed |
 |---|---|---|
-| bad-event (prompt) | 8% | **0%** |
-| bad-event (scenario) | 12% | **8%** |
+| not-permissible violation (prompt) | 8% | **0%** |
+| not-permissible violation (scenario) | 12% | **8%** |
 | overrefusal (prompt) | 20% | **8%** |
 | overrefusal (scenario) | 60% | 80% |
 
@@ -110,10 +110,9 @@ evals/<risk>/eval_config.governed.yaml   governed copy (differs only in run + ca
 acs/<risk>/manifest.yaml + policy/*.rego reviewed, committed ACS policy (semantic output gate)
 ```
 
-Both evals disable the coupled built-in `policy_violation` and grade a custom,
-node-independent bad-event dimension (`fabricated_trip_details` / `budget_overrun`),
-keeping the built-in `overrefusal` as a separate availability metric — a clean ACS
-before/after A/B. Prompt and scenario `sample_size` = 25; `max_turns` = 10; judge
+Both evals use the built-in node-based `policy_violation` and a domain-tuned
+`overrefusal`, reading the decoupled harm signal from
+`not_permissible_policy_violation_rate` (PR #276) — a clean ACS before/after A/B. Prompt and scenario `sample_size` = 25; `max_turns` = 10; judge
 `azure/gpt-5.4`; scenario tester `azure/gpt-5.4-mini` (inherited from
 `default_model`, matching the billing pilot); output annotator `azure/gpt-5.4-mini`.
 
@@ -126,13 +125,17 @@ $env:ASSERT_AZURE_DEPLOYMENT="gpt-4o-mini"   # agent-under-test model (baseline 
 assert-ai run --config examples/travel_planner_langgraph/evals/fabricated-trip-details/eval_config.yaml
 $env:TRAVEL_ACS_MANIFEST="examples/travel_planner_langgraph/acs/fabricated-trip-details/manifest.yaml"
 assert-ai run --config examples/travel_planner_langgraph/evals/fabricated-trip-details/eval_config.governed.yaml
-assert-ai results compare travel-fabricated-trip-details baseline acs-governed --metric fabricated_trip_details
+# Clean decoupled harm signal: not_permissible_policy_violation_rate (PR #276)
+assert-ai results status travel-fabricated-trip-details baseline --json
+assert-ai results status travel-fabricated-trip-details acs-governed --json
 
 # --- Risk 2: budget overrun ---
 assert-ai run --config examples/travel_planner_langgraph/evals/budget-overrun/eval_config.yaml
 $env:TRAVEL_ACS_MANIFEST="examples/travel_planner_langgraph/acs/budget-overrun/manifest.yaml"
 assert-ai run --config examples/travel_planner_langgraph/evals/budget-overrun/eval_config.governed.yaml
-assert-ai results compare travel-budget-overrun baseline acs-governed --metric budget_overrun
+# Clean decoupled harm signal: not_permissible_policy_violation_rate (PR #276)
+assert-ai results status travel-budget-overrun baseline --json
+assert-ai results status travel-budget-overrun acs-governed --json
 ```
 
 `TRAVEL_ACS_MANIFEST` selects which committed policy the one guarded agent

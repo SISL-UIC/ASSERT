@@ -96,7 +96,7 @@ This is long-running (systematize -> test_set -> inference -> judge). Stream sta
 
 **Read only structured artifacts.** Aggregate from the pre-computed, schema'd files — never trawl raw Phoenix/OpenTelemetry traces to reconstruct an answer (that bulk, unguided trace-reading is exactly what the viewer's evidence drawer is for). Reading the `inference_set.jsonl` row for a *specific case the judge already cited* is fine; bulk trace trawling is not.
 
-1. **Headline rates**: run `assert-ai results status <suite> <run>` for per-dimension flagged rates (split into prompt and scenario). Report the violation dimension and `overrefusal` SEPARATELY — they are two different problems. The built-in `policy_violation` ORs over ALL violated taxonomy nodes (permissible included), so it couples with `overrefusal`; for a clean ACS A/B disable it and grade a custom bad-event dimension (see `govern-and-remeasure.md`).
+1. **Headline rates**: run `assert-ai results status <suite> <run>` for per-dimension flagged rates (split into prompt and scenario). Report the violation rate and `overrefusal` SEPARATELY — they are two different problems. The built-in `policy_violation` ORs over ALL violated taxonomy nodes (permissible included), so it couples with `overrefusal`; for a decoupled harm signal read the native `not_permissible_policy_violation_rate` (PR #276) — violations over non-permissible nodes only, no custom dimension needed (see `govern-and-remeasure.md`).
 
 2. **Top failing cases**: read `scores.jsonl` from `artifacts/results/<suite>/<run>/`. For each dimension with failures, pull 3-5 representative cases with:
    - The test case description (what was tested)
@@ -116,7 +116,7 @@ After reporting, point the user to the bundled viewer for anything visual or sel
 cd viewer && npm install && npm run dev   # then open http://localhost:5174
 ```
 
-Select the suite and run for forest plots, per-dimension breakdowns, facet grouping, the permissible vs. not-permissible policy-violation split (a viewer-only breakdown), and a transcript drawer with the judge's `[N]` citations highlighted on the cited turns. Suggest it specifically when the user wants to:
+Select the suite and run for forest plots, per-dimension breakdowns, facet grouping, the permissible vs. not-permissible policy-violation split (in `metrics.json` and `results status`), and a transcript drawer with the judge's `[N]` citations highlighted on the cited turns. Suggest it specifically when the user wants to:
 
 - **read a full transcript** or **see the trace** for a case → viewer evidence drawer
 - **compare against a baseline** → viewer compare view (or `assert-ai results compare <suite> <runA> <runB>`)
@@ -134,8 +134,8 @@ Present a short summary with this structure:
 
 **Headline metrics** (per dimension):
 - Policy violation rate: X% (N/M cases)
+- Not-permissible policy violation rate (decoupled from overrefusal, PR #276): X%
 - Overrefusal rate: X% (N/M cases)
-- [any custom dimensions]: X%
 
 **Top failing cases** (3-5 per dimension):
 For each failure:

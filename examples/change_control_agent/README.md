@@ -36,12 +36,12 @@ context; the Rego denies and the reply is regenerated.
 
 | Metric | Baseline | Governed |
 |---|---|---|
-| bad-event (prompt) | 0% | **0%** |
-| bad-event (scenario) | 52% | **32%** |
+| not-permissible violation (prompt) | 0% | **0%** |
+| not-permissible violation (scenario) | 52% | **32%** |
 | overrefusal (prompt) | 44% | 48% |
 | overrefusal (scenario) | 76% | 80% |
 
-The scenario bad-event rate drops by **20pp** (13/25 → 8/25) while overrefusal is
+The scenario not-permissible violation rate drops by **20pp** (13/25 → 8/25) while overrefusal is
 essentially flat (+4pp). Because the judge scores the *entire* multi-turn
 transcript, a single earlier turn that fabricated before remediation still fails
 the case — so this is a partial, honest reduction rather than elimination. This
@@ -60,12 +60,12 @@ regenerated.
 
 | Metric | Baseline | Governed |
 |---|---|---|
-| bad-event (prompt) | 0% | **0%** |
-| bad-event (scenario) | 12% | **4%** |
+| not-permissible violation (prompt) | 0% | **0%** |
+| not-permissible violation (scenario) | 12% | **4%** |
 | overrefusal (prompt) | 20% | 20% |
 | overrefusal (scenario) | 44% | 44% |
 
-The scenario bad-event rate drops by **8pp** (3/25 → 1/25) with **zero**
+The scenario not-permissible violation rate drops by **8pp** (3/25 → 1/25) with **zero**
 overrefusal cost on either slice — a clean win. The residual case is multi-turn
 drift where clearance-adjacent phrasing appears before the gate re-prompts.
 
@@ -115,19 +115,23 @@ $env:CHANGE_CONTROL_ACS_ANNOTATOR="fabricated_fields"
 $env:CHANGE_CONTROL_ACS_MANIFEST="examples/change_control_agent/acs/fabricated-fields/manifest.yaml"
 assert-ai run --config examples/change_control_agent/evals/fabricated-fields/eval_config.yaml
 assert-ai run --config examples/change_control_agent/evals/fabricated-fields/eval_config.governed.yaml
-assert-ai results compare change-control-fabricated-fields baseline acs-governed --metric fabricated_change_record_fields
+# Clean decoupled harm signal: not_permissible_policy_violation_rate (PR #276)
+assert-ai results status change-control-fabricated-fields baseline --json
+assert-ai results status change-control-fabricated-fields acs-governed --json
 
 # --- Unauthorized approval ---
 $env:CHANGE_CONTROL_ACS_ANNOTATOR="unauthorized_approval"
 $env:CHANGE_CONTROL_ACS_MANIFEST="examples/change_control_agent/acs/unauthorized-approval/manifest.yaml"
 assert-ai run --config examples/change_control_agent/evals/unauthorized-approval/eval_config.yaml
 assert-ai run --config examples/change_control_agent/evals/unauthorized-approval/eval_config.governed.yaml
-assert-ai results compare change-control-unauthorized-approval baseline acs-governed --metric unauthorized_approval
+# Clean decoupled harm signal: not_permissible_policy_violation_rate (PR #276)
+assert-ai results status change-control-unauthorized-approval baseline --json
+assert-ai results status change-control-unauthorized-approval acs-governed --json
 ```
 
-Both evals disable the coupled built-in `policy_violation` dimension and grade a
-custom, node-independent bad-event dimension, keeping `overrefusal` separate — a
-clean ACS before/after A/B. The governed config differs from the baseline in
+Both evals use the built-in node-based `policy_violation` and a domain-tuned
+`overrefusal`, reading the decoupled harm signal from
+`not_permissible_policy_violation_rate` (PR #276) — a clean ACS before/after A/B. The governed config differs from the baseline in
 exactly two lines (`run:` and `target.callable`); systematize + test_set
 artifacts are **Reused** so the two runs share an identical test set. Governed
 re-runs use `--force-stage inference` because a change to `agent_guarded.py` does

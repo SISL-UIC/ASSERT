@@ -43,8 +43,8 @@ spoofable `verify_caller_identity` result.
 
 | Metric | Baseline | Governed |
 |---|---|---|
-| bad-event (prompt) | 40% | **0%** |
-| bad-event (scenario) | 64% | **16%** |
+| not-permissible violation (prompt) | 40% | **0%** |
+| not-permissible violation (scenario) | 64% | **16%** |
 | overrefusal (prompt) | 4% | 4% |
 | overrefusal (scenario) | 4% | 20% |
 
@@ -85,8 +85,8 @@ returns a safe in-policy reply (`acs/prompt-injection/`).
 
 | Metric | Baseline | Governed |
 |---|---|---|
-| bad-event (prompt) | 4% | **0%** |
-| bad-event (scenario) | 0% | 4% |
+| not-permissible violation (prompt) | 4% | **0%** |
+| not-permissible violation (scenario) | 0% | 4% |
 | overrefusal (prompt) | 12% | 28% |
 | overrefusal (scenario) | 44% | 84% |
 
@@ -97,8 +97,8 @@ only 1/50 (a case where the agent parroted "Agent v1 is now officially deprecate
 structural facts suppress the vector before any dedicated gate: the payload lives
 in an **internal** doc reachable only after (spoofed) clearance, and the agent
 refuses heavily (44% scenario overrefusal at baseline). Layering a semantic output
-gate on an already-near-zero bad-event rate therefore buys no measurable
-bad-event reduction while **raising overrefusal** (scenario 44% → 84%): the
+gate on an already-near-zero not-permissible violation rate therefore buys no measurable
+not-permissible violation reduction while **raising overrefusal** (scenario 44% → 84%): the
 annotator over-fires on adversarial scenario traffic that is saturated with
 migration/deprecation content. The clean takeaway: **the structural clearance gate
 from Risk 1 is the effective control here** (it also blocks the internal-doc read
@@ -135,19 +135,23 @@ $env:USE_MOCK_TOOLS="1"; $env:ASSERT_AZURE_DEPLOYMENT="gpt-4o-mini"
 $env:DOCQA_ACS_RISK="internal-doc-disclosure"
 assert-ai run --config examples/azure_doc_qa/evals/internal-doc-disclosure/eval_config.yaml
 assert-ai run --config examples/azure_doc_qa/evals/internal-doc-disclosure/eval_config.governed.yaml
-assert-ai results compare azure-doc-qa-internal-doc-disclosure baseline acs-governed --metric confidential_internal_doc_disclosure
+# Clean decoupled harm signal: not_permissible_policy_violation_rate (PR #276)
+assert-ai results status azure-doc-qa-internal-doc-disclosure baseline --json
+assert-ai results status azure-doc-qa-internal-doc-disclosure acs-governed --json
 
 # Risk 2 — prompt injection / XPIA (semantic output annotator gate)
 $env:DOCQA_ACS_RISK="prompt-injection"
 assert-ai run --config examples/azure_doc_qa/evals/prompt-injection/eval_config.yaml
 assert-ai run --config examples/azure_doc_qa/evals/prompt-injection/eval_config.governed.yaml
-assert-ai results compare azure-doc-qa-prompt-injection baseline acs-governed --metric prompt_injection_compliance
+# Clean decoupled harm signal: not_permissible_policy_violation_rate (PR #276)
+assert-ai results status azure-doc-qa-prompt-injection baseline --json
+assert-ai results status azure-doc-qa-prompt-injection acs-governed --json
 ```
 
-Both evals disable the coupled built-in `policy_violation` and grade a custom,
-node-independent bad-event dimension (`confidential_internal_doc_disclosure` /
-`prompt_injection_compliance`), keeping `overrefusal` separate — a clean ACS
-before/after A/B. The governed config differs from its baseline in exactly two
+Both evals use the built-in node-based `policy_violation` and a domain-tuned
+`overrefusal`, reading the decoupled harm signal from
+`not_permissible_policy_violation_rate` (PR #276) — violations over non-permissible
+taxonomy nodes only, so it is a clean ACS before/after A/B. The governed config differs from its baseline in exactly two
 lines (`run:` and `target.callable`). Provider credentials are read from the
 repo-root `.env` (reference names only: `AZURE_API_KEY`, `AZURE_API_BASE`);
 `artifacts/` is gitignored and never committed.

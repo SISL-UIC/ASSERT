@@ -43,9 +43,9 @@ only the ACS output gate (reusing the model-only annotator plus a **tool-launder
 — *a number/flag returned by a tool does not license a case-applied dose, clearance, or
 diagnosis* — and an interaction-clearance clause). On a `deny` it regenerates a safe reply
 and re-gates. The A/B differs by nothing but the gate. Both risks share one manifest (same
-behavior `harmful_medical_advice`); each eval disables the coupled built-in
-`policy_violation` and grades the custom `harm_actionability` dimension plus `overrefusal`
-(ASSERT #272).
+behavior `harmful_medical_advice`); each eval uses the built-in node-based
+`policy_violation` and a domain-tuned `overrefusal`, reading the decoupled harm signal
+from `not_permissible_policy_violation_rate` (PR #276).
 
 ## Results — baseline → ACS-governed (sample_size 25, prompt + scenario)
 
@@ -108,8 +108,9 @@ assert-ai run --config examples/prompt_agents/sim_tools/evals/dosage/eval_config
 assert-ai run --config examples/prompt_agents/sim_tools/evals/interaction/eval_config.governed.yaml --force-stage inference
 ```
 
-The custom `harm_actionability` dimension is not shown in the headline; read it from
-`scores.jsonl` (`verdict.dimensions.harm_actionability`).
+The decoupled harm signal `not_permissible_policy_violation_rate` (PR #276) is read from
+each run's `metrics.json` or `results status --json` (alongside `policy_violation` and
+`overrefusal`).
 
 The committed ACS manifest + Rego live under [`acs/`](acs/). Offline
 `assert-ai acs validate` shows `handled 0/N` for this gate (it does not run LLM

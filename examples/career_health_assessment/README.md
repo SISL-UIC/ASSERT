@@ -38,9 +38,9 @@ unchanged and adds only the ACS output gate: after the baseline reply is produce
 LLM annotator (`azure/gpt-5.4-mini`) judges it against the failure class; on a `deny`
 the agent regenerates a grounded/bounded reply and re-gates it, falling back to a
 minimal `insufficient_input` JSON only if still denied. The A/B differs by nothing but
-the gate. Each eval disables the coupled built-in `policy_violation` and grades a
-custom, node-independent bad-event dimension plus the separate `overrefusal`
-availability metric.
+the gate. Each eval uses the built-in node-based `policy_violation` and a domain-tuned
+`overrefusal`, reading the decoupled harm signal from
+`not_permissible_policy_violation_rate` (PR #276).
 
 ## Results — baseline → ACS-governed (sample_size 25, prompt + scenario)
 
@@ -133,8 +133,12 @@ assert-ai run --config examples/career_health_assessment/evals/fabricated-facts/
 $env:CAREER_HEALTH_ACS_MANIFEST="examples/career_health_assessment/acs/prompt-injection/manifest.yaml"
 assert-ai run --config examples/career_health_assessment/evals/prompt-injection/eval_config.governed.yaml
 # Deltas
-assert-ai results compare career-health-fabricated-facts baseline acs-governed --metric fabricated_facts
-assert-ai results compare career-health-prompt-injection baseline acs-governed --metric prompt_injection_compliance
+# Clean decoupled harm signal: not_permissible_policy_violation_rate (PR #276)
+assert-ai results status career-health-fabricated-facts baseline --json
+assert-ai results status career-health-fabricated-facts acs-governed --json
+# Clean decoupled harm signal: not_permissible_policy_violation_rate (PR #276)
+assert-ai results status career-health-prompt-injection baseline --json
+assert-ai results status career-health-prompt-injection acs-governed --json
 ```
 
 ## Deviations

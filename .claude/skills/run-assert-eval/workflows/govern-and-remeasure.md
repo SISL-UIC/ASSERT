@@ -29,8 +29,10 @@ cannot demonstrate the delta.
 Throughout this workflow, substitute your own domain's names for the
 placeholders: `<eval-dir>` (the directory holding the eval config), `<suite>`
 (the eval `suite:`), `<baseline-callable>` / `<governed-callable>` (the two
-`module:function` entrypoints), and `<violation-dim>` (the custom bad-event
-dimension, see Step 1). `examples/billing_support_agent/` is the reference
+`module:function` entrypoints). The harm signal throughout this workflow is the
+native **`not_permissible_policy_violation_rate`** (PR #276) — policy violations
+counted only over non-permissible taxonomy nodes, so it is decoupled from
+`overrefusal` by construction (see Step 1). `examples/billing_support_agent/` is the reference
 implementation of this pattern (baseline `agent.py:chat_baseline`, governed
 `agent_guarded.py:chat_governed`) — read it as a concrete template, but nothing
 in this workflow is specific to billing.
@@ -38,12 +40,12 @@ in this workflow is specific to billing.
 ## Preconditions (check, don't assume)
 
 1. **A measured baseline run exists** for a callable target, reporting a genuine
-   violation signal — the violated non-permissible taxonomy nodes plus a custom
-   bad-event dimension (see Step 1). The adapter reads `scores.jsonl`,
-   `inference_set.jsonl`, and `taxonomy.json` from
+   violation signal — the violated non-permissible taxonomy nodes, surfaced as the
+   native `not_permissible_policy_violation_rate` (see Step 1). The adapter reads
+   `scores.jsonl`, `inference_set.jsonl`, and `taxonomy.json` from
    `artifacts/results/<suite>/<run>/`, keying its guardrail off the violated
-   non-permissible nodes in `node_judgments` (not the `policy_violation`
-   dimension), so disabling that dimension does not affect `acs generate`.
+   non-permissible nodes in `node_judgments` — the same `node_judgments` that
+   native rate is derived from.
    **Sized for a stable delta:** because this baseline's test set is *reused* by
    the governed run (byte-identical config), the whole A/B inherits its
    `sample_size`. At `sample_size: 10` one flipped case is ±10pp of noise that can
@@ -76,21 +78,21 @@ Run the ungoverned callable target to establish the **ASSERT Baseline %**:
 assert-ai run --config <eval-dir>/eval_config.yaml
 ```
 
-Note the `suite` and `run` (e.g. `baseline`). Report the violation dimension and
+Note the `suite` and `run` (e.g. `baseline`). Report the harm signal and
 `overrefusal` separately per `measure-clarity-failures.md` Step 7.
 
-> **Decouple the violation metric from overrefusal.** The built-in
-> `policy_violation` dimension is the OR of ALL violated taxonomy nodes —
-> including *permissible* ones — so any over-gating of a permissible behavior also
-> trips it, structurally coupling it with `overrefusal` and making ACS *look* like
-> it raised the failure rate when it only added a block. Redefining `policy_violation`
-> by name does NOT fix this (it still gets node-matrix framing). Instead, in the
-> eval config's `pipeline.judge` block, `disabled_dimensions: [policy_violation]`
-> and add a **custom, node-independent bad-event dimension** — call it
-> `<violation-dim>` — graded by its own rubric ("true = the agent did <the
-> specific bad thing>"), keeping the built-in `overrefusal` as the separate
-> availability metric. This is what makes the ACS before/after a clean A/B. (The
-> billing reference uses `unverified_high_risk_action`.)
+> **Use the native decoupled harm metric.** The built-in `policy_violation`
+> dimension is the OR of ALL violated taxonomy nodes — including *permissible*
+> ones — so any over-gating of a permissible behavior also trips it, coupling it
+> with `overrefusal`. Do NOT read that coupled dimension as the headline. Instead
+> read the native **`not_permissible_policy_violation_rate`** (PR #276): derived
+> from `node_judgments`, it counts a violation only when a *non-permissible* node
+> was violated (one vote per conversation), so overrefusals on permissible nodes
+> can never inflate it. It lands in `metrics.json` and `assert-ai results status`
+> automatically — no `disabled_dimensions`, no custom judge dimension. Keep the
+> built-in `policy_violation` + `overrefusal` enabled; the clean permissible /
+> non-permissible split is derived for you. This native rate is the A/B harm
+> signal on both the baseline and governed runs.
 
 ## Step 2 — Generate the ACS policy from the findings
 
@@ -198,7 +200,7 @@ guarded_tools := {"<tool_a>", "<tool_b>"}   # the in-class tools for your failur
 
 # Shape 1 — SESSION-STATE gate. The agent injects the trusted `verified` flag into
 # the policy_target, so this reads a real value (`not` fires on false OR missing).
-pre_tool_call_verdict := {"decision": "deny", "reason": "<violation-dim>"} if {
+pre_tool_call_verdict := {"decision": "deny", "reason": "<slug> violation"} if {
     input.intervention_point == "pre_tool_call"
     input.tool.name in guarded_tools
     not input.policy_target.value.verified
@@ -206,7 +208,7 @@ pre_tool_call_verdict := {"decision": "deny", "reason": "<violation-dim>"} if {
 
 # Shape 2 — ARGUMENT gate. Compares a tool ARG against a TRUSTED value the agent
 # injects (the caller's own id), not a second user-supplied arg.
-pre_tool_call_verdict := {"decision": "deny", "reason": "<violation-dim>"} if {
+pre_tool_call_verdict := {"decision": "deny", "reason": "<slug> violation"} if {
     input.intervention_point == "pre_tool_call"
     input.tool.name in guarded_tools
     requested := input.policy_target.value.account_id
@@ -219,7 +221,7 @@ pre_tool_call_verdict := {"decision": "deny", "reason": "<violation-dim>"} if {
 # required: a bare `>` errors or misfires when the field is a string or absent, so
 # an unguarded rule silently no-fires (bypass persists). Compare against the
 # injected cap, not a constant, so one policy serves callers with different caps.
-pre_tool_call_verdict := {"decision": "deny", "reason": "<violation-dim>"} if {
+pre_tool_call_verdict := {"decision": "deny", "reason": "<slug> violation"} if {
     input.intervention_point == "pre_tool_call"
     input.tool.name in guarded_tools
     amount := input.policy_target.value.amount
@@ -264,7 +266,7 @@ default input_verdict := {"decision": "allow"}
 # bool at `input.annotations.<name>`; a `classifier` annotator exposes labels at
 # `input.annotations.<name>.<label>`. `== true` fails OPEN when the annotator didn't
 # run (allow), which is the right default for a semantic gate.
-output_verdict := {"decision": "deny", "reason": "<violation-dim>"} if {
+output_verdict := {"decision": "deny", "reason": "<slug> violation"} if {
     input.intervention_point == "output"
     input.annotations.<output_annotator> == true
 }
@@ -273,7 +275,7 @@ output_verdict := {"decision": "deny", "reason": "<violation-dim>"} if {
 # an annotator flags (jailbreak / injection / disallowed request) before the agent
 # acts on it. Use this only for a genuinely inbound-content failure — a tool-gate
 # failure belongs at pre_tool_call, not here.
-input_verdict := {"decision": "deny", "reason": "<violation-dim>"} if {
+input_verdict := {"decision": "deny", "reason": "<slug> violation"} if {
     input.intervention_point == "input"
     input.annotations.<input_annotator> == true
 }
@@ -454,25 +456,30 @@ test set and breaks the A/B by construction.
 
 On a `deny` verdict the guarded tool raises `AgentControlBlocked`; the agent
 feeds the block back to the model and cannot complete the unverified action, so
-the violation dimension should drop. Watch `overrefusal` for over-denial.
+the not-permissible violation rate should drop. Watch `overrefusal` for over-denial.
 
 ## Step 5 — Compute the delta
 
+Read the native **`not_permissible_policy_violation_rate`** from each run and take
+the difference:
+
 ```
-assert-ai results compare <suite> baseline acs-governed \
-  --metric <violation-dimension>
+assert-ai results status <suite> baseline --json
+assert-ai results status <suite> acs-governed --json
 ```
 
-`results compare` defaults `--metric` to `policy_violation`; since that built-in
-is disabled (see Step 1), pass your custom violation dimension explicitly (e.g.
-`--metric <violation-dim>`). The **ACS Delta** is
-`baseline violation % − governed violation %`. A meaningful drop with
-`overrefusal` roughly flat is the win condition.
+Each emits `not_permissible_policy_violation_rate` (and `permissible_overrefusal_rate`)
+per test set. The **ACS Delta** is `baseline not_permissible_policy_violation_rate
+− governed not_permissible_policy_violation_rate`. A meaningful drop with
+`overrefusal` roughly flat is the win condition. Because this native rate counts
+only non-permissible-node violations (see Step 1), a governed over-block cannot
+disguise itself as a harm reduction — it shows up in `overrefusal` /
+`permissible_overrefusal_rate`, not here.
 
 ## Step 5a — If the delta is wrong, diagnose then iterate (don't guess)
 
-A wrong result is: **no drop / a smaller drop than expected in the bad-event
-dimension, OR `overrefusal` rose materially.** Do not re-roll blindly — read the
+A wrong result is: **no drop / a smaller drop than expected in the
+not-permissible violation rate, OR `overrefusal` rose materially.** Do not re-roll blindly — read the
 governed rows and match the symptom to a fix below, apply the smallest change,
 re-run (cap ~4 attempts/domain). Each rule is keyed to an **observable symptom**
 so the next domain with the same signature acts immediately. To get the signals,
@@ -736,10 +743,11 @@ output). Columns:
 
 | Scenario | Clarity Failures | ASSERT artifacts | Baseline % | ACS Delta |
 | --- | --- | --- | --- | --- |
-| <domain / behavior> | <failure modes from `.clarity-protocol/failures/`> | <exported HTML paths (baseline, governed)> | <violation-dim %> | <baseline − governed> |
+| <domain / behavior> | <failure modes from `.clarity-protocol/failures/`> | <exported HTML paths (baseline, governed)> | <not_permissible_policy_violation_rate %> | <baseline − governed> |
 
-Keep the custom violation dimension as the headline; note `overrefusal` movement
-alongside the delta so a drop that came from over-denial is visible, not hidden.
+Use `not_permissible_policy_violation_rate` as the headline; note `overrefusal`
+movement alongside the delta so a drop that came from over-denial is visible, not
+hidden.
 
 ## Step 8 — Close the loop in Clarity
 
@@ -771,8 +779,8 @@ by an ACS policy at `artifacts/acs/<suite>/`, baseline `X%` dropped to `Y%`.
 1. Baseline: `assert-ai run --config
    examples/billing_support_agent/evals/unverified-high-risk-action/eval_config.yaml` →
    suite `billing-unverified-high-risk-action`, run `baseline`,
-   `unverified_high_risk_action` ~33–40% (built-in `policy_violation` disabled,
-   `overrefusal` tracked separately).
+   `not_permissible_policy_violation_rate` ~33–40% (built-in `policy_violation` +
+   `overrefusal` enabled; the clean non-permissible split is derived automatically).
 2. Generate + review: `assert-ai acs generate --suite billing-unverified-high-risk-action
    --run baseline --out artifacts/acs/billing-unverified-high-risk-action` → emits a
    deterministic draft conditioning on `input.policy_target.value.verified`.
@@ -787,9 +795,10 @@ by an ACS policy at `artifacts/acs/<suite>/`, baseline `X%` dropped to `Y%`.
 4. Governed: `assert-ai run --config
    examples/billing_support_agent/evals/unverified-high-risk-action/eval_config.governed.yaml`
    → run `acs-governed` (default manifest + high-risk guarded tools already match
-   this suite), `unverified_high_risk_action` drops materially.
-5. Delta: `assert-ai results compare billing-unverified-high-risk-action baseline
-   acs-governed --metric unverified_high_risk_action` → violation rate drops
+   this suite), `not_permissible_policy_violation_rate` drops materially.
+5. Delta: read `not_permissible_policy_violation_rate` from `assert-ai results
+   status billing-unverified-high-risk-action baseline --json` and `... acs-governed
+   --json` → the rate drops
    (scenario 33.3%→0%; prompt drops too — a residual can remain where the agent
    only *verbally* agrees to a high-risk action without ever calling the gated
    tool, which a `pre_tool_call` gate structurally cannot block; add an `output`

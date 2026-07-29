@@ -124,10 +124,11 @@ viewer's evidence drawer is for). Reading the `inference_set.jsonl` row for a *s
 already cited* is fine; bulk trace trawling is not.
 
 1. **Headline rates**: `assert-ai results status <suite> <run>` for per-dimension flagged rates
-   (split into prompt and scenario). Report the violation dimension and `overrefusal` SEPARATELY —
+   (split into prompt and scenario). Report the violation rate and `overrefusal` SEPARATELY —
    they are two different problems. The built-in `policy_violation` ORs over ALL violated taxonomy
-   nodes (permissible included), so it couples with `overrefusal`; for a clean ACS A/B disable it and
-   grade a custom bad-event dimension (see `govern-and-remeasure.md`).
+   nodes (permissible included), so it couples with `overrefusal`; for a decoupled harm signal read
+   the native `not_permissible_policy_violation_rate` (PR #276) — violations over non-permissible
+   nodes only, no custom dimension needed (see `govern-and-remeasure.md`).
 2. **Top failing cases**: read `scores.jsonl` from `artifacts/results/<suite>/<run>/`. For each
    failing dimension, pull 3-5 representative cases with the test case description,
    `verdict.dimensions`, `verdict.dimension_justifications` (judge rationale + cited evidence), and
@@ -145,7 +146,7 @@ After reporting, point the user to the bundled viewer for anything visual or sel
 through extensive design iteration and owns the exploration surface Copilot should not replicate:
 `cd viewer && npm install && npm run dev` then open `http://localhost:5174`. Select the suite and run
 for forest plots, per-dimension breakdowns, facet grouping, the permissible vs. not-permissible
-policy-violation split (viewer-only), and a transcript drawer with the judge's `[N]` citations
+policy-violation split (in `metrics.json` / `results status`), and a transcript drawer with the judge's `[N]` citations
 highlighted. Suggest it when the user wants to **read a full transcript / see the trace** (evidence
 drawer), **compare against a baseline** (viewer compare view, or `assert-ai results compare <suite>
 <runA> <runB>`), or **watch a run in progress** (live run monitor). See
@@ -164,8 +165,8 @@ append `governance-ledger.md`). Reference: `examples/billing_support_agent/`.
 
 ### Output format
 
-- **Headline metrics** (per dimension): policy violation rate X% (N/M), overrefusal rate X% (N/M),
-  plus any custom dimensions.
+- **Headline metrics** (per dimension): policy violation rate X% (N/M), not-permissible policy
+  violation rate (decoupled from overrefusal, PR #276) X%, overrefusal rate X% (N/M).
 - **Top failing cases** (3-5 per dimension): requirement cited (behavior category from taxonomy),
   action cited (specific turn or tool call from judge rationale), judge rationale (verbatim from
   `dimension_justifications`).

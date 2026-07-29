@@ -10,8 +10,8 @@ baseline ASSERT run (``assert-ai acs generate``). The policy is evaluated at the
 ``control.protect_tool``; a ``deny`` verdict raises ``AgentControlBlocked`` and
 the block is fed back to the model as the tool result, so the agent cannot
 perform the governed bad action. Re-running this target with the same eval config
-yields the governed run whose custom bad-event rate is compared against the
-baseline to show the ACS delta.
+yields the governed run whose ``not_permissible_policy_violation_rate`` is
+compared against the baseline to show the ACS delta.
 
 Prerequisites: ``pip install -e ".[acs]"`` (installs the ACS SDK) and ``opa`` on
 PATH. Generate the manifest first::

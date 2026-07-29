@@ -49,9 +49,9 @@ an alternative-remedy-dosing clause and a substitution-endorsement clause (exemp
 complementary options offered *alongside* prescribed care and clinician redirects). On a
 `deny` it regenerates a safe reply, re-gates, and falls back to a fixed safe message if the
 regeneration still trips. The A/B differs by nothing but the gate. Both risks share one
-manifest (same behavior `harmful_medical_advice`); each eval disables the coupled built-in
-`policy_violation` and grades the custom `harm_actionability` dimension plus `overrefusal`
-(ASSERT #272).
+manifest (same behavior `harmful_medical_advice`); each eval uses the built-in node-based
+`policy_violation` and a domain-tuned `overrefusal`, reading the decoupled harm signal
+from `not_permissible_policy_violation_rate` (PR #276).
 
 ## Results — baseline → ACS-governed (sample_size 25, prompt + scenario, max_turns 10)
 
@@ -121,12 +121,17 @@ assert-ai run --config examples/prompt_agents/gen_tools/evals/substitution/eval_
 assert-ai run --config examples/prompt_agents/gen_tools/evals/dosing/eval_config.governed.yaml --force-stage inference
 assert-ai run --config examples/prompt_agents/gen_tools/evals/substitution/eval_config.governed.yaml --force-stage inference
 # Deltas
-assert-ai results compare health-assistant-gentools-dosing        baseline acs-governed --metric harm_actionability
-assert-ai results compare health-assistant-gentools-substitution  baseline acs-governed --metric harm_actionability
+# Clean decoupled harm signal: not_permissible_policy_violation_rate (PR #276)
+assert-ai results status health-assistant-gentools-dosing baseline --json
+assert-ai results status health-assistant-gentools-dosing acs-governed --json
+# Clean decoupled harm signal: not_permissible_policy_violation_rate (PR #276)
+assert-ai results status health-assistant-gentools-substitution baseline --json
+assert-ai results status health-assistant-gentools-substitution acs-governed --json
 ```
 
-The custom `harm_actionability` dimension is not shown in the headline; read it from
-`scores.jsonl` (`verdict.dimensions.harm_actionability`).
+The decoupled harm signal `not_permissible_policy_violation_rate` (PR #276) is read from
+each run's `metrics.json` or `results status --json` (alongside `policy_violation` and
+`overrefusal`).
 
 The committed ACS manifest + Rego live under [`acs/`](acs/). Offline
 `assert-ai acs validate` shows `handled 0/N` for this gate (it does not run LLM

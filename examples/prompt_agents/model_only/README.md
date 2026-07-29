@@ -46,15 +46,15 @@ adds only the ACS output gate: after the baseline reply is produced, an LLM anno
 (`azure/gpt-5.4-mini`) judges it against the failure class; on a `deny` the agent
 regenerates a safe, helpful reply (general information + clinician / emergency redirect,
 never a bare "I can't") and re-gates it, falling back to a minimal safe reply only if
-still denied. The A/B differs by nothing but the gate. Each eval disables the coupled
-built-in `policy_violation` and grades a custom, node-independent bad-event dimension
-(`unsafe_medical_advice`) plus the separate `overrefusal` availability metric.
+still denied. The A/B differs by nothing but the gate. Each eval uses the built-in node-based
+`policy_violation` and a domain-tuned `overrefusal`, reading the decoupled harm signal
+from `not_permissible_policy_violation_rate` (PR #276).
 
 ## Results — baseline → ACS-governed (sample_size 25, prompt + scenario)
 
 Judge/tester `azure/gpt-5.4`; annotator `azure/gpt-5.4-mini`; agent `azure/gpt-4o-mini`
 (`HEALTH_ASSISTANT_AGENT_MODEL`); `max_turns=10`. Governed reuses each baseline's cached
-test set (a true paired A/B). Bad-event dimension = `unsafe_medical_advice`.
+test set (a true paired A/B). Harm signal = `not_permissible_policy_violation_rate` (PR #276).
 
 **Dosage** (`health-assistant-modelonly-dosage`, 50-case paired A/B):
 
@@ -139,13 +139,17 @@ assert-ai run --config examples/prompt_agents/model_only/evals/dosage/eval_confi
 $env:HEALTH_ASSISTANT_ACS_MANIFEST="examples/prompt_agents/model_only/acs/diagnosis/manifest.yaml"
 assert-ai run --config examples/prompt_agents/model_only/evals/diagnosis/eval_config.governed.yaml --force-stage inference
 # Deltas
-assert-ai results compare health-assistant-modelonly-dosage baseline acs-governed --metric unsafe_medical_advice
-assert-ai results compare health-assistant-modelonly-diagnosis baseline acs-governed --metric unsafe_medical_advice
+# Clean decoupled harm signal: not_permissible_policy_violation_rate (PR #276)
+assert-ai results status health-assistant-modelonly-dosage baseline --json
+assert-ai results status health-assistant-modelonly-dosage acs-governed --json
+# Clean decoupled harm signal: not_permissible_policy_violation_rate (PR #276)
+assert-ai results status health-assistant-modelonly-diagnosis baseline --json
+assert-ai results status health-assistant-modelonly-diagnosis acs-governed --json
 ```
 
-The custom `unsafe_medical_advice` dimension is not shown in the headline (which lists
-only `overrefusal`); read it from `scores.jsonl` (`verdict.dimensions.unsafe_medical_advice`)
-or via `results compare --metric unsafe_medical_advice`.
+The decoupled harm signal `not_permissible_policy_violation_rate` (PR #276) is read from
+each run's `metrics.json` or `results status --json`, which also lists `policy_violation`
+and `overrefusal` separately.
 
 ## Deviations
 

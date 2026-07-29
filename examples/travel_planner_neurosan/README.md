@@ -50,8 +50,8 @@ returned. Governance: **semantic `output` annotator gate** — deny when
 
 | Metric | Baseline | Governed |
 |---|---|---|
-| bad-event (prompt) | 100% | **0%** |
-| bad-event (scenario) | 96% | **47.8%** |
+| not-permissible violation (prompt) | 100% | **0%** |
+| not-permissible violation (scenario) | 96% | **47.8%** |
 | overrefusal (prompt) | 0% | 60% |
 | overrefusal (scenario) | 20% | 95.7% |
 
@@ -74,8 +74,8 @@ gate** — deny when `input.annotations.budget_overrun_classifier == true`
 
 | Metric | Baseline | Governed |
 |---|---|---|
-| bad-event (prompt) | 4% | 4% |
-| bad-event (scenario) | 24% | **13.6%** |
+| not-permissible violation (prompt) | 4% | 4% |
+| not-permissible violation (scenario) | 24% | **13.6%** |
 | overrefusal (prompt) | 0% | 12% |
 | overrefusal (scenario) | 20% | 72.7% |
 
@@ -128,10 +128,9 @@ evals/<risk>/eval_config.governed.yaml   governed copy (differs only in run + ca
 acs/<risk>/manifest.yaml + policy/*.rego reviewed, committed ACS policy (semantic output gate)
 ```
 
-Both evals disable the coupled built-in `policy_violation` and grade a custom,
-node-independent bad-event dimension (`fabricated_details` / `budget_overrun`),
-keeping the built-in `overrefusal` as a separate availability metric — a clean ACS
-before/after A/B. Prompt and scenario `sample_size` = 25; `max_turns` = 10; judge
+Both evals use the built-in node-based `policy_violation` and a domain-tuned
+`overrefusal`, reading the decoupled harm signal from
+`not_permissible_policy_violation_rate` (PR #276) — a clean ACS before/after A/B. Prompt and scenario `sample_size` = 25; `max_turns` = 10; judge
 **and scenario tester** `azure/gpt-5.4`; output annotator `azure/gpt-5.4-mini`.
 
 ## Reproduce
@@ -143,13 +142,17 @@ $env:ASSERT_TARGET_MODEL="azure/gpt-4o-mini"   # agent-under-test model (baselin
 assert-ai run --config examples/travel_planner_neurosan/evals/fabricated-details/eval_config.yaml
 $env:NEUROSAN_ACS_MANIFEST="examples/travel_planner_neurosan/acs/fabricated-details/manifest.yaml"
 assert-ai run --config examples/travel_planner_neurosan/evals/fabricated-details/eval_config.governed.yaml --force-stage inference
-assert-ai results compare travel-neurosan-fabricated-details baseline acs-governed --metric fabricated_details
+# Clean decoupled harm signal: not_permissible_policy_violation_rate (PR #276)
+assert-ai results status travel-neurosan-fabricated-details baseline --json
+assert-ai results status travel-neurosan-fabricated-details acs-governed --json
 
 # --- Risk 2: budget overrun ---
 assert-ai run --config examples/travel_planner_neurosan/evals/budget-overrun/eval_config.yaml
 $env:NEUROSAN_ACS_MANIFEST="examples/travel_planner_neurosan/acs/budget-overrun/manifest.yaml"
 assert-ai run --config examples/travel_planner_neurosan/evals/budget-overrun/eval_config.governed.yaml --force-stage inference
-assert-ai results compare travel-neurosan-budget-overrun baseline acs-governed --metric budget_overrun
+# Clean decoupled harm signal: not_permissible_policy_violation_rate (PR #276)
+assert-ai results status travel-neurosan-budget-overrun baseline --json
+assert-ai results status travel-neurosan-budget-overrun acs-governed --json
 ```
 
 `NEUROSAN_ACS_MANIFEST` selects which committed policy the one guarded agent

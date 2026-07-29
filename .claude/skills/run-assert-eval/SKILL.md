@@ -173,11 +173,12 @@ the `inference_set.jsonl` row for a *specific case the judge already cited* is f
 bulk trace trawling is not.
 
 1. **Headline rates**: run `assert-ai results status <suite> <run>` for per-dimension
-   flagged rates (split into prompt and scenario). Report the violation dimension and
+   flagged rates (split into prompt and scenario). Report the violation rate and
    `overrefusal` SEPARATELY — they are two different problems. Note: the built-in
    `policy_violation` ORs over ALL violated taxonomy nodes (permissible included), so
-   it couples with `overrefusal`; for a clean ACS A/B disable it and grade a custom
-   bad-event dimension (see `workflows/govern-and-remeasure.md`).
+   it couples with `overrefusal`; for a decoupled harm signal read the native
+   `not_permissible_policy_violation_rate` (PR #276) — violations over non-permissible
+   nodes only, no custom dimension needed (see `workflows/govern-and-remeasure.md`).
 
 2. **Top failing cases**: read `scores.jsonl` from `artifacts/results/<suite>/<run>/`.
    For each dimension with failures, pull 3-5 representative cases with:
@@ -204,7 +205,7 @@ cd viewer && npm install && npm run dev   # then open http://localhost:5174
 ```
 
 Select the suite and run for forest plots, per-dimension breakdowns, facet grouping,
-the permissible vs. not-permissible policy-violation split (a viewer-only breakdown),
+the permissible vs. not-permissible policy-violation split (in `metrics.json` and `results status`),
 and a transcript drawer with the judge's `[N]` citations highlighted on the cited turns.
 Suggest it specifically when the user wants to:
 
@@ -234,8 +235,8 @@ Present a short summary with this structure:
 
 **Headline metrics** (per dimension):
 - Policy violation rate: X% (N/M cases)
+- Not-permissible policy violation rate (decoupled from overrefusal, PR #276): X%
 - Overrefusal rate: X% (N/M cases)
-- [any custom dimensions]: X%
 
 **Top failing cases** (3-5 per dimension):
 For each failure:

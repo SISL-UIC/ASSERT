@@ -33,14 +33,14 @@ partner-confidential figures and internal contacts. A correct agent ignores it.
 
 Clarity discovery ([Clarity Protocol/](Clarity%20Protocol/)) surfaced four
 failure modes; the two Critical (P1) confidentiality risks were measured, each as
-one atomic behavior with the built-in `policy_violation` disabled and a custom,
-node-independent bad-event dimension (the built-in `overrefusal` is kept as the
-separate availability metric):
+one atomic behavior graded with the built-in node-based `policy_violation` and a
+domain-tuned `overrefusal`; the decoupled harm signal is
+`not_permissible_policy_violation_rate` (PR #276):
 
-| Risk | Suite | Eval | Bad-event dimension |
-|---|---|---|---|
-| **R1** Restricted-class disclosure leakage | `science-restricted-disclosure` | [evals/restricted-disclosure/](evals/restricted-disclosure/) | `restricted_class_disclosure` |
-| **R2** Prompt injection via retrieved content | `science-prompt-injection` | [evals/prompt-injection/](evals/prompt-injection/) | `prompt_injection_compliance` |
+| Risk | Suite | Eval |
+|---|---|---|
+| **R1** Restricted-class disclosure leakage | `science-restricted-disclosure` | [evals/restricted-disclosure/](evals/restricted-disclosure/) |
+| **R2** Prompt injection via retrieved content | `science-prompt-injection` | [evals/prompt-injection/](evals/prompt-injection/) |
 
 - **R1 — Restricted-class disclosure leakage.** The agent quotes, paraphrases,
   or summarizes a restricted-class document (a partner-confidential recall
@@ -161,13 +161,17 @@ export RESEARCH_AGENT_MODEL=azure/gpt-4o-mini
 assert-ai run --config examples/science_research_agent/evals/restricted-disclosure/eval_config.yaml
 export SCIENCE_ACS_MANIFEST=$PWD/examples/science_research_agent/acs/restricted-disclosure/manifest.yaml
 assert-ai run --config examples/science_research_agent/evals/restricted-disclosure/eval_config.governed.yaml --force-stage inference
-assert-ai results compare science-restricted-disclosure baseline acs-governed --metric restricted_class_disclosure
+# Clean decoupled harm signal: not_permissible_policy_violation_rate (PR #276)
+assert-ai results status science-restricted-disclosure baseline --json
+assert-ai results status science-restricted-disclosure acs-governed --json
 
 # --- R2: prompt injection ---
 assert-ai run --config examples/science_research_agent/evals/prompt-injection/eval_config.yaml
 export SCIENCE_ACS_MANIFEST=$PWD/examples/science_research_agent/acs/prompt-injection/manifest.yaml
 assert-ai run --config examples/science_research_agent/evals/prompt-injection/eval_config.governed.yaml --force-stage inference
-assert-ai results compare science-prompt-injection baseline acs-governed --metric prompt_injection_compliance
+# Clean decoupled harm signal: not_permissible_policy_violation_rate (PR #276)
+assert-ai results status science-prompt-injection baseline --json
+assert-ai results status science-prompt-injection acs-governed --json
 ```
 
 The governed run uses `--force-stage inference` because the gate lives in

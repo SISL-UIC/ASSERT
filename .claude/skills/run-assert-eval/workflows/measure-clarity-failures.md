@@ -107,16 +107,19 @@ Fill from the candidate behavior (real schema field names):
 | `pipeline.test_set.scenario.sample_size` | same — ask once and apply the user's answer to **both** `prompt` and `scenario` unless they say otherwise (`≥25` when the run will feed an ACS before/after A/B — see `govern-and-remeasure.md`) |
 | `pipeline.inference.target` | the target shape (see below) |
 | `pipeline.inference.max_turns` | **set to `10`** (the ASSERT default). Do **not** leave it low (e.g. `2`) — see the multi-turn note below. Use the **same** value in the baseline and governed configs. |
-| `pipeline.judge.preset` + `dimensions` | keep the violation metric **and** `overrefusal` as **separate** dimensions (see the coupling note below) |
+| `pipeline.judge.preset` + `dimensions` | use the built-in node-based `policy_violation` + `overrefusal`; read the decoupled harm signal from `not_permissible_policy_violation_rate` (see the coupling note below) |
 
-> **Built-in `policy_violation` couples with `overrefusal`.** The built-in
-> `policy_violation` dimension is the logical-OR over ALL violated taxonomy nodes
-> — including *permissible* ones — so over-gating a permissible behavior also trips
-> it, and it can never be fully separate from `overrefusal`. For a plain baseline
-> that's usually fine, but for a clean ACS before/after A/B (see
-> `govern-and-remeasure.md`) `disabled_dimensions: [policy_violation]` and add a
-> custom, node-independent bad-event dimension (e.g. `unverified_high_risk_action`)
-> graded by its own rubric, keeping the built-in `overrefusal`.
+> **The `policy_violation` dimension couples with `overrefusal` — read the native
+> split instead.** The built-in `policy_violation` dimension is the logical-OR over
+> ALL violated taxonomy nodes — including *permissible* ones — so over-gating a
+> permissible behavior also trips it, and that dimension can never be fully separate
+> from `overrefusal`. You do **not** need to disable it or hand-author a custom
+> dimension: ASSERT derives **`not_permissible_policy_violation_rate`** (PR #276)
+> from `node_judgments` — violations counted only over non-permissible nodes, one
+> vote per conversation — alongside `permissible_overrefusal_rate`, both in
+> `metrics.json` and `assert-ai results status`. Keep the built-in `policy_violation`
+> + `overrefusal` enabled and report the native non-permissible rate as the clean
+> harm signal; it is also the A/B metric in `govern-and-remeasure.md`.
 
 > **Sizing for noise (why the first-run "10" is often too small).** Each rate is
 > `violations / sample_size`, so at `sample_size: 10` **one flipped case moves the
@@ -198,7 +201,8 @@ Note each `suite`/`run` for the report.
 
 One results table, **one behavior per column, one experiment per row**, with:
 
-- `policy_violation` and `overrefusal` rates reported **separately** (two
+- `policy_violation` (or the decoupled `not_permissible_policy_violation_rate`)
+  and `overrefusal` rates reported **separately** (two
   different problems).
 - Cited failure examples pulled from the run artifacts
   (`assert-ai results status <suite> <run>`, then `scores.jsonl` for
