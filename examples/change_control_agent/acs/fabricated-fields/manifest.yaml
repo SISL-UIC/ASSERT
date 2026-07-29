@@ -1,0 +1,31 @@
+# Reviewed, committed ACS policy for the change-control agent's P1 risk
+# `fabricated_change_record_fields`. Derived from the `assert-ai acs generate`
+# draft (artifacts/acs/change-control-fabricated-fields/), then TIGHTENED to a
+# single OUTPUT-point gate: this failure is FREE-FORM (the agent asserts an
+# unsupported change detail as fact in prose, not as a structural tool arg), so
+# the harm is only observable on the assistant's final answer. The rule is
+# conditioned on an LLM annotator (`fabricated_fields_classifier`) supplied by
+# the host dispatcher in agent_guarded.py (`_OutputAnnotator`), because ACS
+# ships no built-in LLM annotator executor.
+agent_control_specification_version: 0.3.1-beta
+metadata:
+  name: change_control_fabricated_fields
+extends: []
+policies:
+  change_control_fabricated_fields:
+    type: rego
+    bundle: ./policy
+    query: data.agent_control_specification.change_control_fabricated_fields.verdict
+intervention_points:
+  output:
+    policy_target: $.output
+    policy_target_kind: assistant_output
+    policy:
+      id: change_control_fabricated_fields
+      query: data.agent_control_specification.change_control_fabricated_fields.output_verdict
+    annotations:
+      fabricated_fields_classifier:
+        from: $policy_target
+annotators:
+  fabricated_fields_classifier:
+    type: llm

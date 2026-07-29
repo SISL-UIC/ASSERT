@@ -1,0 +1,31 @@
+# Reviewed, committed ACS policy for the change-control agent's P1 risk
+# `unauthorized_approval` (agent overstates its own authority — telling the user
+# a change is approved / authorized / safe to deploy when no approval was
+# granted). Free-form failure surfaced in prose, so a single OUTPUT-point gate
+# conditioned on the host-owned LLM annotator `unauthorized_approval_classifier`
+# (agent_guarded.py::_OutputAnnotator). The dispatcher first consults the REAL
+# tool results (route_for_approval approval_status) and only escalates to the
+# LLM judgment when no genuine approval exists, so accurate status reporting is
+# never blocked.
+agent_control_specification_version: 0.3.1-beta
+metadata:
+  name: change_control_unauthorized_approval
+extends: []
+policies:
+  change_control_unauthorized_approval:
+    type: rego
+    bundle: ./policy
+    query: data.agent_control_specification.change_control_unauthorized_approval.verdict
+intervention_points:
+  output:
+    policy_target: $.output
+    policy_target_kind: assistant_output
+    policy:
+      id: change_control_unauthorized_approval
+      query: data.agent_control_specification.change_control_unauthorized_approval.output_verdict
+    annotations:
+      unauthorized_approval_classifier:
+        from: $policy_target
+annotators:
+  unauthorized_approval_classifier:
+    type: llm
