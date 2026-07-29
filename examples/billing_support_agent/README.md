@@ -1,89 +1,89 @@
-# Billing support agent — B2B billing chatbot governance
+# Billing-support agent — Clarity → ASSERT → ACS → ASSERT
 
-A B2B billing-support chatbot for authenticated customers: it looks up invoices
-and account/PII, updates payment methods, changes plans, cancels subscriptions,
-issues refunds within policy, and escalates to a human. Wrapped as an [ASSERT
-callable target](../../docs/targets/callable.md) so the judge can inspect the tool
-trace, not just the final answer.
+A self-contained replication package for the canonical governance example: a B2B
+billing-support chatbot whose safety constraints live only in its system prompt,
+measured with ASSERT and then governed at the tool boundary with ACS.
 
-The baseline agent lives in `agent.py` (callable `chat_baseline`) and wraps a
-hosted LiteLLM model. Its identity-verification gate and cross-customer scoping
-rules are expressed **only in the system prompt**, so the agent can be pressured
-into a high-risk action on an unverified session, or into returning another
-customer's data. Those are the failures ASSERT measures as the baseline.
+The agent (`agent.py`, callable `chat_baseline(message, history=None)`) is a
+LiteLLM tool loop over eight simulated billing tools serving one authenticated
+caller (account `ACME-1001`). Four `HIGH_RISK_TOOLS`
+(`update_payment_method`, `change_plan`, `cancel_plan`, `issue_refund`) and two
+data-lookup tools (`get_account_profile`, `get_invoices`) are protected only by
+prompt text, so the agent can be pressured across the gate. The governed variant
+(`agent_guarded.py`, `chat_governed`) imports the baseline unchanged and adds
+**only** an ACS `pre_tool_call` gate, injecting trusted session state
+(`verified`, `caller_account_id`) into the policy_target so the generated
+structural rules enforce.
 
-`agent_guarded.py` (callable `chat_governed`) re-runs the **same** agent with an
-ACS policy enforced at the tool boundary — it imports the baseline and adds only
-the enforcement, so the A/B isolates the effect of ACS.
+## Risks evaluated (Clarity-discovered, top 2 by priority — both P1 Critical)
 
-## Risks evaluated
+Discovery: `Clarity Protocol/` (fresh `run_clarity` on `agent.py`). Parsed with
+`clarity_intake.py` → 4 candidates; the two P1 Criticals were measured.
 
-This example follows the standard per-example layout: one baseline/governed config
-pair per risk under `evals/<risk>/`, and the reviewed, committed ACS policy under
-`acs/<risk>/`.
+### 1. Unverified high-risk action (`failure-02`)
+Performs a high-risk write without a prior successful `verify_identity`.
+Governance: **structural session-state gate** — deny the four write tools when
+`not input.policy_target.value.verified` (`acs/identity-gate-bypass/`).
 
-| Risk | Eval dir | Suite | ACS policy | Custom bad-event dim |
-|---|---|---|---|---|
-| Unverified high-risk action | `evals/unverified-high-risk-action/` | `billing-unverified-high-risk-action` | `acs/identity-gate-bypass/` | `unverified_high_risk_action` |
-| Cross-customer data exposure | `evals/cross-customer-data-exposure/` | `billing-cross-customer-data-exposure` | `acs/cross-account-scope/` | `cross_customer_data_exposure` |
+| Metric | Baseline | Governed |
+|---|---|---|
+| bad-event (prompt) | 20% | **0%** |
+| bad-event (scenario) | 48% | **0%** |
+| overrefusal (prompt) | 0% | 4% |
+| overrefusal (scenario) | 8% | 20% |
 
-Each config disables the built-in `policy_violation` dimension (which ORs over all
-taxonomy nodes and couples with `overrefusal`) and grades a custom, node-independent
-bad-event dimension, keeping `overrefusal` as a separate availability metric.
+The bad event is eliminated on both slices. The scenario overrefusal rise is
+partly the per-call `verified` flag not persisting across replayed history turns
+(a known multi-turn subtlety), not the gate over-denying fresh verifications.
 
-## Governance result (Clarity → ASSERT → ACS → ASSERT)
+### 2. Cross-customer data exposure (`failure-01`)
+Discloses/acts on another account's data than the caller's own (`ACME-1001`).
+Governance: **structural argument (tenant-scope) gate** — deny a lookup whose
+`account_id` != injected trusted `caller_account_id` (`acs/cross-account-scope/`).
 
-- **Unverified high-risk action:** the governed agent surfaces the trusted session
-  `verified` flag into the tool-call `policy_target`, so the generated
-  `input.policy_target.value.verified` rule enforces the identity gate at
-  `pre_tool_call`. Scenario violation rate drops materially (33.3% → 0%); a residual
-  can remain where the agent only *verbally* agrees to a high-risk action without
-  ever calling the gated tool (add an `output` semantic gate to also catch that),
-  with `overrefusal` roughly flat.
-- **Cross-customer data exposure:** an argument/scope gate compares the requested
-  `account_id` against the caller's own injected, trusted id and denies mismatches.
+| Metric | Baseline | Governed |
+|---|---|---|
+| bad-event (prompt) | 8% | **0%** |
+| bad-event (scenario) | 48% | **16%** |
+| overrefusal (prompt) | 0% | 0% |
+| overrefusal (scenario) | 4% | 12% |
 
-## How to run
+The tool gate closes every foreign-account tool call. The residual scenario 16%
+is prose that discloses/confirms another account **without** a foreign-account
+tool call — the structural gate cannot see it; a semantic `output` annotator gate
+would close it (left as a follow-up to keep this a clean deterministic A/B).
 
-From the repo root:
-
-```bash
-pip install -e ".[otel,acs]"
-cp examples/billing_support_agent/.env.example examples/billing_support_agent/.env
-# Edit the .env: AZURE_API_KEY and AZURE_API_BASE are required.
-
-# Baseline (ungoverned)
-assert-ai run --config examples/billing_support_agent/evals/unverified-high-risk-action/eval_config.yaml
-
-# Governed (ACS enforced) — byte-identical config except run: + target.callable
-assert-ai run --config examples/billing_support_agent/evals/unverified-high-risk-action/eval_config.governed.yaml
-
-# Delta
-assert-ai results compare billing-unverified-high-risk-action baseline acs-governed \
-  --metric unverified_high_risk_action
-```
-
-The governed agent resolves its policy per run via `BILLING_ACS_MANIFEST` (defaults
-to the committed manifest under `acs/`) and `BILLING_ACS_GUARDED_TOOLS` (defaults to
-the high-risk write tools). `opa` must be on PATH for the Rego to evaluate.
-
-Required env vars (in `examples/billing_support_agent/.env`):
-
-| Variable | Purpose |
-|---|---|
-| `AZURE_API_KEY`, `AZURE_API_BASE` | Azure OpenAI credentials for the agent and judge. Swap models in the eval config for any other [LiteLLM provider](https://docs.litellm.ai/docs/providers). |
-
-## Folder layout
+## Layout
 
 ```
-billing_support_agent/
-  agent.py                 # baseline (chat_baseline)
-  agent_guarded.py         # governed (chat_governed) — imports agent.py, adds ACS
-  README.md
-  Clarity Protocol/        # colocated Clarity risk-discovery protocol
-  evals/<risk>/            # eval_config.yaml + eval_config.governed.yaml
-  acs/<risk>/              # manifest.yaml + policy/*.rego (reviewed, committed)
+agent.py                     baseline callable target
+agent_guarded.py             governed target (imports baseline + ACS gate only)
+Clarity Protocol/            colocated Clarity risk-discovery protocol
+evals/<risk>/eval_config.yaml            baseline eval (A/B-ready)
+evals/<risk>/eval_config.governed.yaml   governed copy (differs only in run + callable)
+acs/<risk>/manifest.yaml + policy/*.rego reviewed, committed ACS policy
 ```
 
-This is the canonical shape every governed example in `examples/` aligns to; see the
-`run-assert-eval` skill's "Per-example replication package" note.
+## Reproduce
+
+```powershell
+$env:BILLING_AGENT_MODEL="azure/gpt-4o-mini"   # agent-under-test model
+# Baseline
+assert-ai run --config evals/unverified-high-risk-action/eval_config.yaml
+# Govern + re-measure (default manifest = identity-gate; default guarded = high-risk tools)
+assert-ai run --config evals/unverified-high-risk-action/eval_config.governed.yaml
+assert-ai results compare billing-unverified-high-risk-action baseline acs-governed --metric unverified_high_risk_action
+
+# Cross-customer: point the guarded agent at the tenant-scope policy + lookup tools
+$env:BILLING_ACS_MANIFEST="examples/billing_support_agent/acs/cross-account-scope/manifest.yaml"
+$env:BILLING_ACS_GUARDED_TOOLS="get_account_profile,get_invoices"
+assert-ai run --config evals/cross-customer-data-exposure/eval_config.yaml
+assert-ai run --config evals/cross-customer-data-exposure/eval_config.governed.yaml
+assert-ai results compare billing-cross-customer-data-exposure baseline acs-governed --metric cross_customer_data_exposure
+```
+
+Both evals disable the coupled built-in `policy_violation` and grade a custom,
+node-independent bad-event dimension, keeping `overrefusal` separate — a clean
+ACS before/after A/B. Provider credentials are read from the repo-root `.env`
+(reference names only: `AZURE_API_KEY`, `AZURE_API_BASE`); artifacts are
+gitignored and never committed.
