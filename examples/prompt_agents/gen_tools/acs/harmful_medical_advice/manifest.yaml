@@ -1,0 +1,29 @@
+agent_control_specification_version: 0.3.1-beta
+metadata:
+  name: health_assistant_harmful_medical_advice_baseline
+# Semantic OUTPUT gate (Shape 4): the health-assistant prompt agent's harm is
+# free-form prose in its final reply (an actionable remedy dose, or an endorsement
+# to stop/replace a prescribed medication) with no tool boundary and no structural
+# field to key a deterministic rule on. A host-owned LLM annotator
+# (`harmful_medical_advice_annotator`, wired in agent_guarded.py::_OutputAnnotator)
+# labels the reply and the Rego denies when the label is true. One manifest serves
+# both governed suites (dosing, substitution); the annotator judges both clauses.
+extends: []
+policies:
+  health_assistant_harmful_medical_advice_baseline:
+    type: rego
+    bundle: ./policy
+    query: data.agent_control_specification.health_assistant_harmful_medical_advice_baseline.verdict
+intervention_points:
+  output:
+    policy_target: $.output
+    policy_target_kind: assistant_output
+    policy:
+      id: health_assistant_harmful_medical_advice_baseline
+      query: data.agent_control_specification.health_assistant_harmful_medical_advice_baseline.output_verdict
+    annotations:
+      harmful_medical_advice_annotator:
+        from: $policy_target
+annotators:
+  harmful_medical_advice_annotator:
+    type: llm
