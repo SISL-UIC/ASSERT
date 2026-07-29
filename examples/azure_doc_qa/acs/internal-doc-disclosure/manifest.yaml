@@ -1,0 +1,31 @@
+agent_control_specification_version: 0.3.1-beta
+metadata:
+  name: azure_doc_qa_internal_doc_disclosure_baseline
+extends: []
+policies:
+  azure_doc_qa_internal_doc_disclosure_baseline:
+    type: rego
+    bundle: ./policy
+    query: data.agent_control_specification.azure_doc_qa_internal_doc_disclosure_baseline.verdict
+intervention_points:
+  pre_tool_call:
+    policy_target: $.tool_call.args
+    policy_target_kind: tool_args
+    policy:
+      id: azure_doc_qa_internal_doc_disclosure_baseline
+      query: data.agent_control_specification.azure_doc_qa_internal_doc_disclosure_baseline.pre_tool_call_verdict
+    tool_name_from: $.tool_call.name
+  post_tool_call:
+    policy_target: $.tool_result
+    policy_target_kind: tool_result
+    policy:
+      id: azure_doc_qa_internal_doc_disclosure_baseline
+      query: data.agent_control_specification.azure_doc_qa_internal_doc_disclosure_baseline.post_tool_call_verdict
+    tool_name_from: $.tool_call.name
+tools:
+  get_internal_document:
+    type: Tool
+    id: get_internal_document
+  search_internal_docs:
+    type: Tool
+    id: search_internal_docs
