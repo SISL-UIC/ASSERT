@@ -1,0 +1,38 @@
+{
+  "documentState": {
+    "solution/architecture.md": {
+      "contentHash": "e0aff1cc6f37e678716fcbd2754163f40ae5c6e3b3ac6d21912f8441fcf3128e",
+      "dependencyHashes": {}
+    },
+    "goal/problem.md": {
+      "contentHash": "fafac656f9fdcdcfa46636741d1953048685630a5b14532bdf638e702108e3e6",
+      "dependencyHashes": {}
+    },
+    "summary.md": {
+      "contentHash": "9c883c139235fac4fcdbda0158781443f7c47133716af4f09cb335262782d49b",
+      "dependencyHashes": {
+        "goal/problem.md": "fafac656f9fdcdcfa46636741d1953048685630a5b14532bdf638e702108e3e6"
+      }
+    },
+    "goal/requirements.md": {
+      "contentHash": "da25f0d0bc474f3124a89415c371e5f3332ba15e69bad45f23e77422c15634f5",
+      "dependencyHashes": {
+        "goal/problem.md": "fafac656f9fdcdcfa46636741d1953048685630a5b14532bdf638e702108e3e6"
+      }
+    },
+    "failures/failures.md": {
+      "contentHash": "126c7177a1118b9f8a8289b24c729b10753f84803c24dd642755d34ae913be1e",
+      "dependencyHashes": {
+        "solution/architecture.md": "e0aff1cc6f37e678716fcbd2754163f40ae5c6e3b3ac6d21912f8441fcf3128e"
+      }
+    }
+  },
+  "decisionState": {
+    "01": {
+      "status": "decided",
+      "relatedDocs": {},
+      "decidedDate": "2026-07-29",
+      "reviewBy": null
+    }
+  }
+}

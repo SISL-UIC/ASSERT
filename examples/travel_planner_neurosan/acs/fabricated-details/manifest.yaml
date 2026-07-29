@@ -1,0 +1,32 @@
+agent_control_specification_version: 0.3.1-beta
+metadata:
+  name: travel_neurosan_fabricated_details_baseline
+extends: []
+policies:
+  travel_neurosan_fabricated_details_baseline:
+    type: rego
+    bundle: ./policy
+    query: data.agent_control_specification.travel_neurosan_fabricated_details_baseline.verdict
+# Reviewed from the `assert-ai acs generate` draft
+# (artifacts/acs/travel-neurosan-fabricated-details/): fabrication is a free-form
+# OUTPUT failure (the harm is the prose the itinerary_optimizer writes, not the
+# user's request), so the reviewed policy keeps ONE general `output` annotator
+# (`fabrication_classifier`) and drops any `input` gate — gating inbound
+# "give me an exact price" prompts would pre-empt legitimate planning and inflate
+# overrefusal. The annotator is an `llm` type returning a bool, consumed as
+# `input.annotations.fabrication_classifier == true` (fails OPEN when the annotator
+# did not run — the right default for a semantic gate). `validate` cannot exercise
+# this (no annotator runtime); it is proven by the governed remeasure delta.
+intervention_points:
+  output:
+    policy_target: $.output
+    policy_target_kind: assistant_output
+    policy:
+      id: travel_neurosan_fabricated_details_baseline
+      query: data.agent_control_specification.travel_neurosan_fabricated_details_baseline.output_verdict
+    annotations:
+      fabrication_classifier:
+        from: $policy_target
+annotators:
+  fabrication_classifier:
+    type: llm
