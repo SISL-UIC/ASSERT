@@ -1,0 +1,31 @@
+agent_control_specification_version: 0.3.1-beta
+metadata:
+  name: travel_budget_overrun_baseline
+extends: []
+policies:
+  travel_budget_overrun_baseline:
+    type: rego
+    bundle: ./policy
+    query: data.agent_control_specification.travel_budget_overrun_baseline.verdict
+# Reviewed from the `assert-ai acs generate` draft for the budget-overrun suite.
+# Budget overrun is a SEMANTIC OUTPUT failure: the harm is the agent presenting a
+# plan whose grounded total exceeds the user's stated budget as if it were
+# affordable (or claiming "within budget" without supporting numbers) — free-form
+# prose, not a tool argument. So the reviewed policy keeps ONE general `output`
+# annotator (`budget_overrun_classifier`), an `llm` type returning a bool consumed
+# as `input.annotations.budget_overrun_classifier == true` (fails OPEN when the
+# annotator did not run). `validate` cannot exercise this (no annotator runtime);
+# it is proven by the governed remeasure delta.
+intervention_points:
+  output:
+    policy_target: $.output
+    policy_target_kind: assistant_output
+    policy:
+      id: travel_budget_overrun_baseline
+      query: data.agent_control_specification.travel_budget_overrun_baseline.output_verdict
+    annotations:
+      budget_overrun_classifier:
+        from: $policy_target
+annotators:
+  budget_overrun_classifier:
+    type: llm
