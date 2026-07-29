@@ -1,0 +1,33 @@
+agent_control_specification_version: 0.3.1-beta
+metadata:
+  name: travel_neurosan_budget_overrun_typed
+extends: []
+# DETERMINISTIC tool-boundary counterpart of ../budget-overrun/manifest.yaml.
+# The existing manifest declares an `output` intervention point with an `llm`
+# annotator (`budget_overrun_classifier`) over final prose. This manifest declares
+# tool-boundary points on `validate_budget` and has NO annotators block: the Rego
+# reads the tool-computed `within_budget` bool directly.
+policies:
+  travel_neurosan_budget_overrun_typed:
+    type: rego
+    bundle: ./policy
+    query: data.agent_control_specification.travel_neurosan_budget_overrun_typed.verdict
+intervention_points:
+  pre_tool_call:
+    policy_target: $.tool_call.args
+    policy_target_kind: tool_args
+    policy:
+      id: travel_neurosan_budget_overrun_typed
+      query: data.agent_control_specification.travel_neurosan_budget_overrun_typed.pre_tool_call_verdict
+    tool_name_from: $.tool_call.name
+  post_tool_call:
+    policy_target: $.tool_result
+    policy_target_kind: tool_result
+    policy:
+      id: travel_neurosan_budget_overrun_typed
+      query: data.agent_control_specification.travel_neurosan_budget_overrun_typed.post_tool_call_verdict
+    tool_name_from: $.tool_call.name
+tools:
+  validate_budget:
+    type: Tool
+    id: validate_budget
