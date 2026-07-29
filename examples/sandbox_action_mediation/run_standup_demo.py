@@ -1,7 +1,7 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
 
-"""Interactive five-minute standup demo for the stock ASSERT sandbox path."""
+"""Keypress-driven command runner for the five-minute standup demo."""
 from __future__ import annotations
 
 import argparse
@@ -11,27 +11,21 @@ import subprocess
 import sys
 
 HERE = Path(__file__).resolve().parent
+ROOT = HERE.parents[1]
 SETUP = HERE / "assert-setup-container.yaml"
 RUNNER = HERE / "run_stock_scenario.py"
 
 
-def slide(title: str, detail: str) -> None:
-    print("\n" + "=" * 76, flush=True)
-    print(title, flush=True)
-    print("=" * 76, flush=True)
-    print(detail, flush=True)
-
-
-def wait_for_advance(enabled: bool, prompt: str = "Press SPACE or ENTER to continue...") -> None:
+def wait_for_command(enabled: bool, display: str) -> None:
+    print("\n" + "─" * 76)
+    print("Press SPACE or ENTER to run:")
+    print(f"  {display}", flush=True)
     if not enabled:
         return
-    print(f"\n{prompt}", end="", flush=True)
     if not sys.stdin.isatty():
         input()
         return
 
-    # The standup path runs in WSL over SSH from a Mac Terminal. Read one key in
-    # cbreak mode so SPACE advances immediately without requiring ENTER.
     try:
         import termios
         import tty
@@ -54,7 +48,7 @@ def wait_for_advance(enabled: bool, prompt: str = "Press SPACE or ENTER to conti
 
 
 def run(*args: str) -> None:
-    subprocess.run(list(args), check=True, cwd=HERE.parents[1])
+    subprocess.run(list(args), check=True, cwd=ROOT)
 
 
 def docker_resource_count(kind: str, name_filter: str) -> int:
@@ -82,22 +76,11 @@ def main() -> int:
     interactive = not args.no_pause
 
     try:
-        slide(
-            "Sandboxed action mediation in ASSERT",
-            "ASSERT evals deliberately try to make agents take risky actions. The stock "
-            "sandbox lets safe operations run against disposable state, suppresses "
-            "irreversible effects, blocks undeclared network access, and preserves every "
-            "attempt as judge evidence.\n\n"
-            "This demo uses a fixed input so the proof does not depend on model availability.",
+        validate_display = (
+            "python -m assert_ai.integrations.sandbox.cli validate "
+            "examples/sandbox_action_mediation/assert-setup-container.yaml"
         )
-        wait_for_advance(interactive, "Press SPACE or ENTER to validate the setup...")
-
-        slide(
-            "1/3  Validate the user's sandbox setup",
-            "The user supplies a configured agent image, policy.yaml, mocks.yaml, and "
-            "optional cassettes. ASSERT checks that they agree before starting Docker.",
-        )
-        wait_for_advance(interactive, "Press SPACE or ENTER to run validation...")
+        wait_for_command(interactive, validate_display)
         run(
             sys.executable,
             "-m",
@@ -105,15 +88,14 @@ def main() -> int:
             "validate",
             str(SETUP),
         )
-        wait_for_advance(interactive)
 
-        slide(
-            "2/3  Preview one irreversible action",
-            "Policy decides whether send_message may execute. Only after policy selects "
-            "mock does ASSERT resolve the argument-specific synthetic response. The mock "
-            "file cannot weaken the policy decision.",
+        resolve_display = (
+            "python -m assert_ai.integrations.sandbox.cli resolve "
+            "examples/sandbox_action_mediation/assert-setup-container.yaml "
+            "send_message --args "
+            "'{\"recipient\":\"555-000-9999\",\"channel\":\"sms\"}'"
         )
-        wait_for_advance(interactive, "Press SPACE or ENTER to resolve send_message...")
+        wait_for_command(interactive, resolve_display)
         run(
             sys.executable,
             "-m",
@@ -124,46 +106,27 @@ def main() -> int:
             "--args",
             json.dumps({"recipient": "555-000-9999", "channel": "sms"}),
         )
-        wait_for_advance(interactive)
 
-        slide(
-            "3/3  Run the real stock Docker sandbox",
-            "ASSERT starts a fresh hardened container, sends one fixed turn through normal "
-            "inference, records tool and network evidence, and tears the sandbox down.\n\n"
-            "Watch for three facts:\n"
-            "  • lookup_customer passes and really executes\n"
-            "  • send_message is mocked and its real implementation does not execute\n"
-            "  • undeclared example.com egress is denied",
+        sandbox_display = (
+            "python examples/sandbox_action_mediation/run_stock_scenario.py "
+            "--check-baseline"
         )
-        wait_for_advance(interactive, "Press SPACE or ENTER to start the sandbox...")
+        wait_for_command(interactive, sandbox_display)
         run(sys.executable, str(RUNNER), "--check-baseline")
-        wait_for_advance(interactive)
 
-        slide(
-            "Cleanup check",
-            "A fresh sandbox is owned by one test case. No ASSERT container or network "
-            "should remain after the inference turn.",
+        cleanup_display = (
+            "docker container ls -a --filter name=assert-sandbox-  &&  "
+            "docker network ls --filter name=assert-sandbox-net-"
         )
-        wait_for_advance(interactive, "Press SPACE or ENTER to verify cleanup...")
+        wait_for_command(interactive, cleanup_display)
         containers = docker_resource_count("container", "assert-sandbox-")
         networks = docker_resource_count("network", "assert-sandbox-net-")
         print(f"Remaining ASSERT containers: {containers}")
         print(f"Remaining ASSERT networks:   {networks}")
         if containers or networks:
             raise RuntimeError("sandbox cleanup left Docker resources behind")
-        wait_for_advance(interactive)
 
-        slide(
-            "What this means for C11",
-            "The core ASSERT path now works end to end: setup, disposable container "
-            "lifecycle, pass/mock/block enforcement, denied egress, and judge-visible "
-            "evidence.\n\n"
-            "The planning question is whether C11 should focus on onboarding real agents "
-            "and hardening setup from their feedback, and whether to commit to one tailored "
-            "Red Teaming consumer. A generic sandbox platform is not required for this proof.",
-        )
-        wait_for_advance(interactive, "Press SPACE or ENTER to finish...")
-        print("\nDEMO COMPLETE: pass/mock/egress evidence was produced and cleanup succeeded.")
+        print("\nDEMO COMPLETE")
         return 0
     except KeyboardInterrupt:
         print("\n\nDemo stopped by presenter.", file=sys.stderr)
