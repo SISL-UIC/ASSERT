@@ -3,9 +3,15 @@
 The goal is to find confusing behavior, unsafe behavior, brittle setup, and bad
 evidence. This is not a scripted demo where everyone follows the same path.
 
-Start together with the baseline, then split across scenario cards. Each person
-should choose one primary card and explore beyond the exact steps when something
-looks suspicious.
+Everyone runs the shared baseline, then the facilitator assigns one of four
+scenarios. Do not read or complete every scenario.
+
+## Session plan
+
+- **5–10 minutes:** common setup and baseline
+- **20 minutes:** assigned scenario
+- **10 minutes:** vary one input or configuration and try to break it
+- **10 minutes:** file issues and share findings
 
 ## Safety boundaries
 
@@ -27,53 +33,49 @@ python -m pip install -e .
 docker build \
   -f examples/sandbox_action_mediation/stock_agent/Dockerfile \
   -t assert-sandbox-stock-agent:local .
+
+python examples/sandbox_action_mediation/run_stock_scenario.py --check-baseline
 ```
 
 PowerShell activation is `.\.venv\Scripts\Activate.ps1`; the remaining commands
 are the same when Docker Desktop is available.
 
-Run the shared baseline:
-
-```bash
-python examples/sandbox_action_mediation/run_stock_scenario.py --check-baseline
-```
-
-The baseline should produce a normal ASSERT `inference_set.jsonl` and report:
+The baseline should print the artifact path and report:
 
 - `lookup_customer`: `mode=pass`, `real_executed=true`;
 - `send_message`: `mode=mock`, `real_executed=false`;
 - `network_egress`: denied for `example.com`.
 
-Record the artifact path printed by the runner. If setup fails, file the issue
-before borrowing someone else's environment.
+If setup fails, file that issue before borrowing someone else's environment.
 
-## Scenario card A — first-time Docker onboarding
+## Assignment A — new-user setup and evidence
 
-**Question:** Can a new user get from checkout to judge-visible sandbox evidence
-without prior knowledge of this implementation?
+**Question:** Can a new user run the feature and understand what happened without
+already knowing its internals?
 
 1. Follow only the common setup above.
-2. Read the generated `inference_set.jsonl` without using source-code knowledge.
+2. Open the generated `inference_set.jsonl`.
 3. Find the attempted tool arguments, policy mode, actual execution status, mock
    result, and network decision.
-4. Run the baseline a second time and check for leftover containers or networks:
+4. Run the baseline again and check cleanup:
 
 ```bash
 docker ps -a --filter name=assert-sandbox-
 docker network ls --filter name=assert-sandbox-net-
 ```
 
-Explore path handling, rebuild behavior, error wording, and anything that differs
-on your operating system.
+Try one natural variation: rebuild the image, move the checkout, change the input
+message, or follow the instructions on a different operating system. File issues
+for unclear evidence and documentation friction, not only crashes.
 
-## Scenario card B — per-use-case mock setup
+## Assignment B — configure a per-use-case mock
 
-**Question:** Can a user create a realistic argument-specific mock without
-changing the agent or Dockerfile?
+**Question:** Can a user add realistic mock behavior without changing the agent
+or Dockerfile?
 
-1. In `mocks.yaml`, change the response for the `send_message` rule whose
-   recipient is **not** `555-123-2002`. Give it an unmistakable status or message.
-2. Check which rule resolves before running Docker:
+1. In `mocks.yaml`, find the `send_message` rule for recipients that are not
+   `555-123-2002` and give its response an unmistakable status or message.
+2. Check the setup and rule before running Docker:
 
 ```bash
 python -m assert_ai.integrations.sandbox.cli validate \
@@ -84,21 +86,25 @@ python -m assert_ai.integrations.sandbox.cli resolve \
   send_message --args '{"recipient":"555-000-9999","channel":"sms"}'
 ```
 
-3. Run the Docker scenario without `--check-baseline` and confirm the new response
-   appears in action evidence.
-4. Add a narrower rule with another `when:` matcher. Check whether
-   most-specific-first behavior is understandable.
-5. Try one typo or unmatched argument and judge the validator/error quality.
+3. Run the Docker scenario without `--check-baseline`:
 
-Restore the file afterward:
+```bash
+python examples/sandbox_action_mediation/run_stock_scenario.py
+```
+
+4. Confirm the edited response appears in action evidence.
+5. Add one narrower rule or mismatched argument and explore whether specificity,
+   fallback behavior, and validation are understandable.
+
+Restore your edit afterward:
 
 ```bash
 git restore examples/sandbox_action_mediation/mocks.yaml
 ```
 
-## Scenario card C — policy cannot be weakened by mocks
+## Assignment C — test the policy boundary
 
-**Question:** Does enforcement remain independent from mock content?
+**Question:** Can mock content ever weaken enforcement?
 
 1. Change the `send_message` policy rule from `mock` to `block` without deleting
    its mock rules.
@@ -110,47 +116,55 @@ python examples/sandbox_action_mediation/run_stock_scenario.py
 
 3. Confirm `send_message` reports `mode=block`, `real_executed=false`, and an
    explicit denial rather than the configured mock response.
-4. Exercise the default policy:
+4. Vary one policy detail: try a glob, reorder rules, alter the default, or add a
+   note. Look for surprising matching and unclear evidence.
 
-```bash
-python examples/sandbox_action_mediation/run_stock_scenario.py \
-  --message "try an unknown tool"
-```
-
-5. Confirm `delete_account` is blocked by the default rule.
-
-Explore globs, rule ordering, missing rules, and confusing policy notes. Never
-change an irreversible tool to `pass` unless its real implementation is the
-provided raising containment sentinel.
+Restore your edit afterward:
 
 ```bash
 git restore examples/sandbox_action_mediation/policy.yaml
 ```
 
-## Scenario card D — failures and cleanup
+## Assignment D — state or failure handling
 
-**Question:** Do setup failures explain the problem and leave the host clean?
+Choose **one** path. Do not complete both unless you finish early.
 
-Try one or more:
+### Path 1: disposable state
 
-- Change `health_path` to `/not-ready`.
-- Change the image name to one that does not exist.
-- Point `mocks:` at a missing file.
-- Introduce malformed YAML.
-- Interrupt the runner while it is waiting for or using the container.
+```bash
+python examples/sandbox_action_mediation/run_stock_scenario.py \
+  --message "state coherence"
+```
 
-After every failure, check:
+Expected evidence: `get_line_status` returns `suspended`, `resume_line` executes,
+and a later `get_line_status` returns `connected`.
+
+Then start a fresh case:
+
+```bash
+python examples/sandbox_action_mediation/run_stock_scenario.py \
+  --message "status only"
+```
+
+Expected: the new container reports `suspended`, proving the mutation did not leak
+between cases. Vary the sequence or run it repeatedly and look for stale state.
+
+### Path 2: failure and cleanup
+
+Introduce one failure: use a wrong image name or health path, point `mocks:` at a
+missing file, introduce malformed YAML, or interrupt the run.
+
+Afterward, check:
 
 ```bash
 docker ps -a --filter name=assert-sandbox-
 docker network ls --filter name=assert-sandbox-net-
 ```
 
-Look for leaked resources, swallowed root causes, excessive waits, stack traces
-that do not identify the bad field, and cleanup errors that hide the startup
-failure.
+Look for leaked resources, swallowed root causes, excessive waits, and cleanup
+errors that hide the original failure.
 
-Restore local changes before switching cards:
+Restore setup files afterward:
 
 ```bash
 git restore examples/sandbox_action_mediation/assert-setup-container.yaml \
@@ -158,77 +172,44 @@ git restore examples/sandbox_action_mediation/assert-setup-container.yaml \
   examples/sandbox_action_mediation/mocks.yaml
 ```
 
-## Scenario card E — failures and disposable state
+## Stretch ideas
 
-**Question:** Do simulated failures look real to the agent, and does mutable state
-stay coherent without leaking across cases?
-
-Simulated external failure:
+Use these only after the assigned scenario:
 
 ```bash
+# Simulated external failure; the real billing implementation must not execute
 python examples/sandbox_action_mediation/run_stock_scenario.py \
-  --message "exercise the simulated failure"
+  --message "simulated failure"
+
+# Unknown tool should hit the default block rule
+python examples/sandbox_action_mediation/run_stock_scenario.py \
+  --message "unknown tool"
+
+# Fast Docker-free policy/mock check
+python examples/sandbox_action_mediation/run_scenario.py --expect mock
 ```
 
-Expected: `apply_bill_credit` is `mock`, `real_executed=false`, and returns the
-configured `CREDIT_LIMIT_EXCEEDED` failure. Its raising real implementation must
-not execute.
-
-State coherence inside one disposable case:
-
-```bash
-python examples/sandbox_action_mediation/run_stock_scenario.py \
-  --message "check state coherence"
-```
-
-Expected evidence: `get_line_status` returns `suspended`, `resume_line` executes,
-and a later `get_line_status` returns `connected`.
-
-State reset in a fresh case:
-
-```bash
-python examples/sandbox_action_mediation/run_stock_scenario.py \
-  --message "status only"
-```
-
-Expected: the new container reports `suspended`, proving the prior mutation did
-not leak between test cases.
-
-## Scenario card F — can a reviewer understand the evidence?
-
-**Question:** Is the artifact useful without reading implementation code?
-
-Exchange an `inference_set.jsonl` path with another participant. Without asking
-what they changed, answer:
-
-1. What did the agent attempt?
-2. What really executed?
-3. Which policy rule matched?
-4. Did a mock rule provide the response?
-5. Was the result a simulated error?
-6. Was network egress attempted and allowed?
-7. What, if anything, would you cite in a review or incident report?
-
-File an issue if the answer exists technically but is hard to find, ambiguous, or
-requires knowledge that is not present in the artifact.
+You can also exchange an artifact with another participant and see whether they
+can identify what was attempted, what executed, what rule matched, and whether
+egress occurred without reading source code.
 
 ## Filing issues
 
 Use a title like:
 
 ```text
-[Bug Bash][Action Mediation][Card C] Blocked call still looks mocked
+[Bug Bash][Action Mediation][Assignment C] Blocked call still looks mocked
 ```
 
 Include:
 
 - operating system, Python version, and Docker version;
 - branch and commit;
-- scenario card;
+- assignment;
 - exact steps and local edits;
 - expected and actual behavior;
 - artifact path or a minimal redacted excerpt;
-- whether any container/network remained afterward.
+- whether any container or network remained afterward.
 
-Confusing documentation, unclear evidence, and unexpectedly slow steps are bugs
-for this session even when the code eventually succeeds.
+Confusing documentation, unclear evidence, and unexpectedly slow steps count as
+bugs even when the code eventually succeeds.

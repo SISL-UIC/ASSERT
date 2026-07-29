@@ -100,14 +100,15 @@ def test_bug_bash_scenario_fails_loudly_if_policy_allows_real_send(tmp_path):
     assert "real send_message implementation executed" in result.stderr
 
 
-def test_bug_bash_guide_routes_people_across_exploratory_cards():
+def test_bug_bash_guide_routes_people_across_focused_assignments():
     guide = (EXAMPLE / "BUG_BASH.md").read_text(encoding="utf-8")
-    for card in "ABCDEF":
-        assert f"Scenario card {card}" in guide
+    for assignment in "ABCD":
+        assert f"Assignment {assignment}" in guide
+    assert "Assignment E" not in guide
     assert "run_stock_scenario.py --check-baseline" in guide
     lowered = guide.lower()
-    assert "per-use-case mock setup" in lowered
-    assert "failures and cleanup" in lowered
-    assert "disposable state" in lowered
-    assert "can a reviewer understand the evidence" in lowered
+    assert "configure a per-use-case mock" in lowered
+    assert "test the policy boundary" in lowered
+    assert "state or failure handling" in lowered
+    assert "stretch ideas" in lowered
     assert STOCK_RUNNER.exists()

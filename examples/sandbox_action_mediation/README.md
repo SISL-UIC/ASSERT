@@ -58,9 +58,9 @@ backend.
 ## Fast bug-bash path
 
 For the full exploratory session, use [`BUG_BASH.md`](BUG_BASH.md). It starts
-with this deterministic check, then splits participants across Docker onboarding,
-mock matching, enforcement boundaries, cleanup failures, state coherence, and
-evidence interpretation.
+with this deterministic check, then assigns reviewers to one of four focused
+paths: new-user setup and evidence, mock configuration, policy enforcement, or
+state/failure handling.
 
 This introductory path takes under a minute and requires no model credentials,
 Docker, admin permissions, or generated eval artifacts.
