@@ -56,7 +56,7 @@ Help the user set the right target in the config:
 - **Framework agent** (LangGraph, CrewAI, etc.) with a Python entry function: use `target.callable` WITH `target.trace` so the judge can cite tool calls and routing.
 - **Hosted model** with a system prompt and optional tools: use `target.model` and `target.tools`.
 - **Pre-collected traces** (no live inference needed): use `assert-ai judge-traces --traces <path> --config <path>`; do not add a `--trace` flag to `assert-ai run`.
-- **Black-box HTTP endpoint** you cannot instrument: write a thin Python callable shim that calls the endpoint, use it as `target.callable` with no `target.trace`, and state that the judge sees only final text. This is a fallback, not the recommended path.
+- **Black-box HTTP endpoint** you cannot import as Python: use `target.endpoint` — the runtime POSTs `{"message": ..., "history": [...]}` and reads `{"response": ...}`, so no wrapper code is needed (requires `aiohttp`). Only write a thin `target.callable` shim if the service's request/response shape differs. Either way the judge sees only final text, so this is a fallback, not the recommended path.
 
 ### 3. Run the pipeline
 
