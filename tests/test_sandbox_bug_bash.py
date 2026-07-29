@@ -15,6 +15,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE = ROOT / "examples" / "sandbox_action_mediation"
 RUNNER = EXAMPLE / "run_scenario.py"
+STOCK_RUNNER = EXAMPLE / "run_stock_scenario.py"
 
 
 def _run(*args: str) -> subprocess.CompletedProcess[str]:
@@ -97,3 +98,16 @@ def test_bug_bash_scenario_fails_loudly_if_policy_allows_real_send(tmp_path):
     assert result.returncode != 0
     assert "CONTAINMENT FAILURE" in result.stderr
     assert "real send_message implementation executed" in result.stderr
+
+
+def test_bug_bash_guide_routes_people_across_exploratory_cards():
+    guide = (EXAMPLE / "BUG_BASH.md").read_text(encoding="utf-8")
+    for card in "ABCDEF":
+        assert f"Scenario card {card}" in guide
+    assert "run_stock_scenario.py --check-baseline" in guide
+    lowered = guide.lower()
+    assert "per-use-case mock setup" in lowered
+    assert "failures and cleanup" in lowered
+    assert "disposable state" in lowered
+    assert "can a reviewer understand the evidence" in lowered
+    assert STOCK_RUNNER.exists()

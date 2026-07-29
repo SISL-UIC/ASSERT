@@ -7,10 +7,13 @@ import asyncio
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
+import sys
 import tempfile
 
 import pytest
+import yaml
 
 from assert_ai.core.model_client import Message
 from assert_ai.core.config_model import EvaluationConfig, InferenceConfig, TargetConfig
@@ -19,6 +22,7 @@ from assert_ai.integrations.sandbox.session import SandboxedEndpointSession
 from assert_ai.stages.inference import run_inference
 
 ROOT = Path(__file__).resolve().parents[1]
+EXAMPLE = ROOT / "examples" / "sandbox_action_mediation"
 RUN = os.environ.get("ASSERT_RUN_DOCKER_TESTS", "").lower() in {"1", "true", "yes"}
 pytestmark = pytest.mark.skipif(
     not RUN or not docker_available(),
@@ -184,3 +188,79 @@ def test_stock_sandbox_runs_through_normal_assert_inference_artifact():
         assert metadata[0]["raw_socket_audit"] is False
 
     asyncio.run(exercise())
+
+
+def _run_stock_scenario(*args: str) -> subprocess.CompletedProcess[str]:
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(ROOT)
+    return subprocess.run(
+        [
+            sys.executable,
+            "examples/sandbox_action_mediation/run_stock_scenario.py",
+            *args,
+        ],
+        cwd=ROOT,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=90,
+    )
+
+
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        ("state coherence", ['service_status": "suspended', 'service_status": "connected']),
+        ("status only", ['service_status": "suspended']),
+        (
+            "simulated failure",
+            ["apply_bill_credit: mode=mock real_executed=false", "CREDIT_LIMIT_EXCEEDED"],
+        ),
+        ("unknown tool", ["delete_account: mode=block real_executed=false"]),
+    ],
+)
+def test_bug_bash_stock_scenario_variants(message, expected):
+    result = _run_stock_scenario("--message", message)
+    assert result.returncode == 0, result.stderr
+    for value in expected:
+        assert value in result.stdout
+
+
+def test_bug_bash_argument_specific_mock_edit_reaches_docker_evidence(tmp_path):
+    copied = tmp_path / "example"
+    shutil.copytree(EXAMPLE, copied)
+    mocks_path = copied / "mocks.yaml"
+    mocks = yaml.safe_load(mocks_path.read_text(encoding="utf-8"))
+    rule = next(
+        rule
+        for rule in mocks["mocks"]
+        if rule.get("tool") == "send_message" and rule.get("when")
+    )
+    rule["response"]["status"] = "bugbash_custom_status"
+    mocks_path.write_text(yaml.safe_dump(mocks, sort_keys=False), encoding="utf-8")
+
+    result = _run_stock_scenario(
+        "--setup", str(copied / "assert-setup-container.yaml")
+    )
+    assert result.returncode == 0, result.stderr
+    assert '"status": "bugbash_custom_status"' in result.stdout
+    assert "send_message: mode=mock real_executed=false" in result.stdout
+
+
+def test_bug_bash_block_policy_ignores_existing_mock_in_docker_path(tmp_path):
+    copied = tmp_path / "example"
+    shutil.copytree(EXAMPLE, copied)
+    policy_path = copied / "policy.yaml"
+    policy = yaml.safe_load(policy_path.read_text(encoding="utf-8"))
+    rule = next(rule for rule in policy["interactions"] if rule.get("match") == "send_message")
+    rule["mode"] = "block"
+    policy_path.write_text(yaml.safe_dump(policy, sort_keys=False), encoding="utf-8")
+
+    result = _run_stock_scenario(
+        "--setup", str(copied / "assert-setup-container.yaml")
+    )
+    assert result.returncode == 0, result.stderr
+    assert "send_message: mode=block real_executed=false" in result.stdout
+    assert '"status": "blocked"' in result.stdout
+    assert "msg-mock-0002" not in result.stdout

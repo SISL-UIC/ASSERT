@@ -57,8 +57,13 @@ backend.
 
 ## Fast bug-bash path
 
-This path takes under a minute and requires no model credentials, Docker, admin
-permissions, or generated eval artifacts.
+For the full exploratory session, use [`BUG_BASH.md`](BUG_BASH.md). It starts
+with this deterministic check, then splits participants across Docker onboarding,
+mock matching, enforcement boundaries, cleanup failures, state coherence, and
+evidence interpretation.
+
+This introductory path takes under a minute and requires no model credentials,
+Docker, admin permissions, or generated eval artifacts.
 
 From an editable ASSERT checkout:
 
