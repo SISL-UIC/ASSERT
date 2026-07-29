@@ -49,12 +49,12 @@ def test_sandbox_target_is_a_first_class_exclusive_target():
         TargetConfig(sandbox="sandbox.yaml", endpoint="http://localhost/chat")
 
 
-def test_stock_docker_assets_are_packaged_and_match_the_runnable_example():
+def test_stock_docker_assets_are_packaged_with_copyable_agent():
     assets = importlib.resources.files("assert_ai.integrations.sandbox.stock")
     root = Path(__file__).resolve().parents[1]
-    assert assets.joinpath("Dockerfile").read_text() == (
-        root / "examples/sandbox_action_mediation/stock_agent/Dockerfile"
-    ).read_text()
+    dockerfile = assets.joinpath("Dockerfile").read_text()
+    assert "ARG ASSERT_AI_PACKAGE=assert-ai" in dockerfile
+    assert "USER 65534:65534" in dockerfile
     assert assets.joinpath("server.py").read_text() == (
         root / "examples/sandbox_action_mediation/stock_agent/server.py"
     ).read_text()

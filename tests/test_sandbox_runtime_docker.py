@@ -30,8 +30,10 @@ pytestmark = pytest.mark.skipif(
 def stock_image():
     subprocess.run(
         [
-            "docker", "build", "-t", "assert-sandbox-stock-agent:local",
-            "examples/sandbox_action_mediation/stock_agent",
+            "docker", "build",
+            "-f", "examples/sandbox_action_mediation/stock_agent/Dockerfile",
+            "-t", "assert-sandbox-stock-agent:local",
+            ".",
         ],
         cwd=ROOT,
         check=True,
@@ -84,8 +86,21 @@ def test_real_stock_sandbox_contains_and_audits_egress_and_cleans_up():
                 for message in response.interaction_messages
                 if message.get("role") == "tool"
             ]
-            assert "sandbox_configuration" in tools
+            assert "lookup_customer" in tools
+            assert "send_message" in tools
             assert "network_egress" in tools
+            tool_results = {
+                message.get("function"): json.loads(message.get("content") or "{}")
+                for message in response.interaction_messages
+                if message.get("role") == "tool"
+                and message.get("function") in {"lookup_customer", "send_message"}
+            }
+            assert tool_results["lookup_customer"]["mode"] == "pass"
+            assert tool_results["lookup_customer"]["real_executed"] is True
+            assert tool_results["send_message"]["mode"] == "mock"
+            assert tool_results["send_message"]["real_executed"] is False
+            assert tool_results["send_message"]["returned"]["status"] == "sent"
+            assert "returned sent" in response.text
             egress = "\n".join(
                 message.get("content", "")
                 for message in response.interaction_messages
@@ -157,7 +172,8 @@ def test_stock_sandbox_runs_through_normal_assert_inference_artifact():
             for event in row["events"]
             if event["edit"].get("type") == "tool_call"
         ]
-        assert "sandbox_configuration" in tools
+        assert "lookup_customer" in tools
+        assert "send_message" in tools
         assert "network_egress" in tools
         metadata = [
             event["raw"]["session"]

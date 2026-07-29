@@ -45,8 +45,9 @@ hardening opportunity.
   irreversible outside-world actions, and blocks unknown tools.
 - `mocks.yaml` demonstrates argument matching, simulated failures, stateful
   scenarios, and replay overrides.
-- `stock_agent/` is a small configured endpoint used to exercise the stock
-  container contract. Replace its image with your configured agent image.
+- `stock_agent/` is a copyable configured endpoint with one real sandbox-local
+  tool and one mocked irreversible tool. It demonstrates the complete wiring,
+  not only the HTTP shape.
 - `eval_config_container.yaml` runs the stock container target.
 - `eval_config.yaml` runs the equivalent already-running endpoint target.
 
@@ -76,7 +77,7 @@ Build the small reference image:
 
 ```bash
 docker build -t assert-sandbox-stock-agent:local \
-  examples/sandbox_action_mediation/stock_agent
+  -f examples/sandbox_action_mediation/stock_agent/Dockerfile .
 ```
 
 Then run the normal ASSERT pipeline:
@@ -89,6 +90,30 @@ assert-ai run \
 The reference config uses `concurrency: 1` because every test case receives its
 own disposable container. Increase concurrency only after choosing host resource
 limits appropriate for the configured image.
+
+### What the reference agent demonstrates
+
+[`stock_agent/server.py`](stock_agent/server.py) is the smallest complete user
+path:
+
+1. Load `MediationPolicy` and `MockLibrary` from the files ASSERT mounted.
+2. Register the real tool implementations with `AgentHooksToolHost`.
+3. Call every tool through `host.call_tool(...)`, never directly.
+4. Return new `MediationRecord` values through `assert_tool_event(...)` in the
+   endpoint's top-level `events` list.
+
+The example's `lookup_customer` implementation executes because policy selects
+`pass`. Its `send_message` implementation raises `CONTAINMENT FAILURE` if it is
+ever reached; policy selects `mock`, so the real function does not run and the
+agent receives the argument-specific production-shaped response from
+`mocks.yaml`. The same turn also makes a harmless HTTP request so denied egress
+appears beside the tool evidence.
+
+To adapt it, copy the server and Dockerfile, replace the two tool functions with
+your agent's tools, and preserve the mediated call boundary plus the
+`response`/`events` endpoint contract. Your image can use an MCP server, framework
+adapter, or another HTTP router instead; `AgentHooksToolHost` is the
+framework-neutral boundary they call.
 
 A configured image must:
 
