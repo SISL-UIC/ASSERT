@@ -558,8 +558,135 @@ pipeline:
 ![Run counts, population variance, and redundant pairs](figures/run_consistency.png)
 
 
-## Key findings
+## V1 vs V2 Key findings
 
 Skill-v2 substantially outperformed Skill-v1 on breadth and coverage while preserving similarly high relevance. Across the three harms, V2 generated 77 dimension instances and 57 globally unique dimensions, compared with 33 and 27 for V1. It also produced 56 relevant unique dimensions versus 27, increased the share of perfectly relevant unique dimensions from 70.4% to 78.9%, and improved scenario-space coverage from 69.7 to 85.3 (+15.7 points). Coverage improved for every harm: +20 points for violent content, +11 for relationship entanglement, and +16 for imminent crisis management. V2 also achieved higher embedding diversity, LLM pair diversity, mean relevance, and expected adversarial pressure overall, although the gains in the latter three metrics were modest.
 
 The main V2 tradeoff is efficiency and consistency. Its unique-to-total rate fell from 81.8% to 74.0%, indicating more repetition and a greater need for deduplication. Relationship entanglement had slightly lower LLM pair diversity, and imminent crisis management had lower mean relevance and a lower perfect-relevance rate.
+
+## Evaluating V2 Across Harm-Specific Evaluations
+
+This section evaluates the quality of V2 template generation across a broader set of eight harms. Unless otherwise noted, the results are based on $N=3$ independent template-generation runs per harm.
+
+### Unique and Relevant Dimensions
+
+| Harm | Total | Duplicates removed | Unique | Unique / total | Relevant unique | Relevant / unique |
+| --- | --- | --- | --- | --- | --- | --- |
+| anthropomorphic_behaviors | 25 | 3 | 22 | 0.8800 | 22 | 1.0000 |
+| child_safety | 29 | 12 | 17 | 0.5862 | 17 | 1.0000 |
+| hate_speech_harassment | 26 | 4 | 22 | 0.8462 | 22 | 1.0000 |
+| imminent_crisis_management | 23 | 9 | 14 | 0.6087 | 14 | 1.0000 |
+| malicious_cyber_activity | 27 | 8 | 19 | 0.7037 | 19 | 1.0000 |
+| relationship_entanglement | 27 | 6 | 21 | 0.7778 | 20 | 0.9524 |
+| sexual_content | 30 | 12 | 18 | 0.6000 | 18 | 1.0000 |
+| violent_content | 27 | 6 | 21 | 0.7778 | 21 | 1.0000 |
+
+Across the eight harms, 153 of 154 unique dimensions (99.4%) were judged relevant. Seven harms achieved 100% relevance among their unique dimensions; relationship entanglement remained close at 95.2%. This consistency indicates that V2 expands the evaluation space without introducing substantial off-topic variation.
+
+### Diversity and Relevance
+
+| Harm | LLM pair diversity | Relevance mean |
+| --- | --- | --- |
+| anthropomorphic_behaviors | 0.9627 | 3.6800 |
+| child_safety | 0.9442 | 3.9310 |
+| hate_speech_harassment | 0.9687 | 3.9615 |
+| imminent_crisis_management | 0.9394 | 3.8696 |
+| malicious_cyber_activity | 0.9630 | 3.8148 |
+| relationship_entanglement | 0.9563 | 3.8148 |
+| sexual_content | 0.9503 | 3.8000 |
+| violent_content | 0.9615 | 3.7407 |
+
+LLM pair-diversity scores ranged from 0.9394 to 0.9687, while mean relevance ranged from 3.6800 to 3.9615 out of 4. Together, these results show that the generated dimensions are both meaningfully distinct and strongly grounded in each harm definition.
+
+### Coverage
+
+| Harm | Coverage score |
+| --- | --- |
+| anthropomorphic_behaviors | 69 |
+| child_safety | 80 |
+| hate_speech_harassment | 88 |
+| imminent_crisis_management | 81 |
+| malicious_cyber_activity | 84 |
+| relationship_entanglement | 77 |
+| sexual_content | 94 |
+| violent_content | 87 |
+
+Mean coverage across the eight harms was 82.5, with six harms scoring at least 80 and sexual content reaching 94. The results demonstrate broad scenario-space coverage across substantially different harm domains, while also identifying anthropomorphic behaviors and relationship entanglement as the clearest opportunities for further improvement.
+
+### Varying $N$
+
+The preceding experiments use $N=3$, but production evaluations need to balance coverage against generation cost. To identify a practical value of $N$, we ran template generation eight times per harm and calculated the metrics for cumulative run counts of $N=3$, $5$, $7$, and $8$. This analysis shows how quickly the generated templates approach their attainable coverage and where additional runs begin to yield diminishing returns.
+
+#### Anthropomorphic Behaviors
+
+![Anthropomorphic Behaviors run-prefix metrics](figures/metric_plots/anthropomorphic_behaviors.png)
+
+#### Child Safety
+
+![Child Safety run-prefix metrics](figures/metric_plots/child_safety.png)
+
+#### Hate Speech Harassment
+
+![Hate Speech Harassment run-prefix metrics](figures/metric_plots/hate_speech_harassment.png)
+
+#### Imminent Crisis Management
+
+![Imminent Crisis Management run-prefix metrics](figures/metric_plots/imminent_crisis_management.png)
+
+#### Malicious Cyber Activity
+
+![Malicious Cyber Activity run-prefix metrics](figures/metric_plots/malicious_cyber_activity.png)
+
+#### Relationship Entanglement
+
+![Relationship Entanglement run-prefix metrics](figures/metric_plots/relationship_entanglement.png)
+
+#### Sexual Content
+
+![Sexual Content run-prefix metrics](figures/metric_plots/sexual_content.png)
+
+#### Violent Content
+
+![Violent Content run-prefix metrics](figures/metric_plots/violent_content.png)
+
+### End-to-End Evaluation
+
+We also evaluated the templates end to end by using their dimensions to generate prompts and scenarios, then comparing the resulting policy-violation rates with generation performed without predefined dimensions. This comparison tests whether the broader, structured sampling space produced by the templates translates into more discovered policy violations.
+
+<table>
+  <thead>
+    <tr>
+      <th rowspan="2">Harm</th>
+      <th colspan="2">With Template</th>
+      <th colspan="2">Without Template</th>
+    </tr>
+    <tr>
+      <th>Prompt violation</th>
+      <th>Scenario violation</th>
+      <th>Prompt violation</th>
+      <th>Scenario violation</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>imminent_crisis_management</td>
+      <td>88.3% (526)</td>
+      <td>96.1% (373)</td>
+      <td>85.7% (257)</td>
+      <td>97.0% (194)</td>
+    </tr>
+    <tr>
+      <td>violent_content</td>
+      <td>2.8% (17)</td>
+      <td>8.7% (26)</td>
+      <td>2.3% (7)</td>
+      <td>8.0% (12)</td>
+    </tr>
+  </tbody>
+</table>
+
+## V2 Evaluation: Key Findings
+
+- **Strong quality across harms:** V2 consistently generates large sets of diverse, highly relevant dimensions. Nearly every unique dimension was judged relevant, LLM pair-diversity scores remained high across all eight harms, and coverage reached 77 or higher for seven of the eight harms. These results show that the approach generalizes beyond the three harms used in the V1-to-V2 comparison.
+- **A practical quality-cost tradeoff:** Although $N=3$ already produces highly relevant and diverse dimension sets, increasing to $N=5$ delivers the largest additional coverage gain. Larger values provide comparatively limited improvement, indicating diminishing returns after five runs. We therefore recommend $N=5$ when coverage is the priority and $N=1$ when budget is the primary constraint.
+- **Greater absolute violation discovery:** Template-guided generation produced higher policy-violation rates in three of the four comparisons and, more importantly, substantially more violating prompts and scenarios in absolute terms. The template condition intentionally used more generated cases because its larger dimension set defines a broader sampling space that requires more prompts and scenarios to cover. The absolute counts therefore demonstrate the template's main end-to-end advantage: it exposes many more policy-violating cases by systematically exploring a wider range of harm-relevant conditions.

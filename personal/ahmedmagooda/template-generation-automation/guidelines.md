@@ -58,17 +58,16 @@ sources. Each retained dimension should have distinct levels and citations that
 explain why the dimension belongs in the evaluation.
 
 Run the skill independently `N` times to reduce the chance that one research pass
-misses an important part of the harm space. We used `N = 3` in the original
-experiments. Three runs are a practical starting point, not a universal rule.
+misses an important part of the harm space. We suggest `N = 5` if coverage is the main objective, but if cost is a concern then we suggest using $N=1$. Five runs are a practical starting point, not a universal rule.
 Use the same harm definition, target context, and generation instructions in each
 run so differences mainly reflect research and generation variability.
 
 Preserve the following artifacts from every run:
 
 - `eval_config.yaml`: the runnable ASSERT configuration;
-- `dimension_ledger.md`: the candidate dimensions and their keep, merge, or
+<!-- - `dimension_ledger.md`: the candidate dimensions and their keep, merge, or
   reject decisions; and
-- `validation.md`: the skill's evidence, schema, and coverage checks.
+- `validation.md`: the skill's evidence, schema, and coverage checks. -->
 
 Arrange the artifacts by harm and run because this is the layout expected by the
 evaluation script:
@@ -78,16 +77,10 @@ evaluation script:
 `-- violent_content/
   |-- run-1/
   |   |-- eval_config.yaml
-  |   |-- dimension_ledger.md
-  |   `-- validation.md
   |-- run-2/
   |   |-- eval_config.yaml
-  |   |-- dimension_ledger.md
-  |   `-- validation.md
   `-- run-3/
     |-- eval_config.yaml
-    |-- dimension_ledger.md
-    `-- validation.md
 ```
 
 A generated dimension should resemble the following structure:
@@ -142,6 +135,24 @@ The corresponding environment variables are `AZURE_API_BASE`,
 `ASSERT_ANALYSIS_EMBEDDING_DEPLOYMENT`, and `ASSERT_ANALYSIS_JUDGE_MODEL`.
 Authentication details are documented by the script's `--help` output.
 
+For each harm, the evaluator measures cumulative run prefixes ending at runs
+`3`, `5`, `7`, and every later odd run. The final run is always included, so a
+seven-run harm is evaluated at `1..3`, `1..5`, and `1..7`, while an eight-run
+harm also receives `1..8`. Harms may have different run counts. Run directory
+names are naturally sorted before prefixes are selected.
+
+Complete artifacts for each prefix are written under:
+
+```text
+<templates-dir>/analysis/run-prefixes/<harm>/runs-1-to-<N>/
+```
+
+The root `<templates-dir>/analysis/` artifacts remain the final all-runs view for
+each harm. Its `metrics.json` also includes a compact `cumulative_run_results`
+index with links and summary metrics for every prefix. Embeddings are computed
+once per harm and reused across prefixes; the three coordinated LLM grading
+requests run separately for each prefix.
+
 ### Metrics to Review
 
 The evaluator reports:
@@ -171,6 +182,27 @@ The analysis is written to `<templates-dir>/analysis/`. Start with:
 - `coverage_dimension_suggestions.yaml` for candidate additions; and
 - `metrics.json` for complete prompts, model settings, and grader outputs.
 
+Generate a report for every harm in one evaluated experiment directory:
+
+```bash
+.venv/bin/python personal/ahmedmagooda/template-generation-automation/generate_report_plots.py \
+  <templates-dir>
+```
+
+Or compare only the harms present in both evaluated directories:
+
+```bash
+.venv/bin/python personal/ahmedmagooda/template-generation-automation/generate_report_plots.py \
+  <first-templates-dir> \
+  <second-templates-dir>
+```
+
+Use `--output-dir <path>` to override the report destination. The command also
+creates `<templates-dir>/<harm>/merged/eval_config.yaml` when it is absent. It
+copies the first run as the base and replaces its dimensions with the evaluator's
+selected representative from each unique-dimension group. Existing merged
+configurations are never overwritten.
+
 In the original experiments, the working goals were diversity above `0.8`, more
 than `90%` relevant unique dimensions, and coverage above `75`. These are useful
 research targets, not universal acceptance criteria. Review the score rationales,
@@ -181,8 +213,9 @@ generation pass is needed.
 
 Build the final candidate set from the union of the independent runs:
 
-1. Review each group in `unique_dimension_groups.csv` and select the clearest,
-   best-supported representative. Do not deduplicate by name alone.
+1. Start from the generated `merged/eval_config.yaml`. Review each group in
+  `unique_dimension_groups.csv` and confirm that the selected representative is
+  the clearest and best-supported. Do not accept deduplication by name alone.
 2. Remove dimensions that are weakly related to the harm, unsupported by the
    cited evidence, redundant with another retained dimension, or impossible for
    the configured target to express.
