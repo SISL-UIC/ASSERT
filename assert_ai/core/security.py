@@ -189,20 +189,15 @@ def validate_endpoint_url(url: str, *, allow_private: bool = False) -> None:
             f"URL hostname '{hostname}' is blocked (potential metadata endpoint)"
         )
 
-    # Try to parse as IP address
+    # Validate IP literals directly; hostnames are checked after DNS resolution.
     try:
-        ip = ipaddress.ip_address(hostname)
-        for network in _BLOCKED_IP_RANGES:
-            if ip in network:
-                raise ValueError(
-                    f"URL resolves to blocked IP range ({network}): {hostname}"
-                )
-    except ValueError as e:
-        if "blocked" in str(e).lower():
-            raise
-        # Not an IP literal — resolve hostname and check resulting IPs
+        ipaddress.ip_address(hostname)
+    except ValueError:
+        # Not an IP literal — resolve hostname and check resulting IPs.
         if hostname.lower() not in _LOCAL_DEV_HOSTNAMES:
             _validate_resolved_ips(hostname)
+    else:
+        validate_resolved_endpoint_ip(hostname, hostname)
 
 
 def _validate_resolved_ips(hostname: str) -> None:
@@ -219,23 +214,67 @@ def _validate_resolved_ips(hostname: str) -> None:
         log.debug("DNS resolution failed for '%s'; skipping IP validation", hostname)
         return
 
-    for family, _type, _proto, _canonname, sockaddr in addrinfo:
-        ip_str = sockaddr[0]
-        try:
-            ip = ipaddress.ip_address(ip_str)
-        except ValueError:
-            continue
-        for network in _BLOCKED_IP_RANGES:
-            if ip in network:
-                log.warning(
-                    "SSRF protection: hostname '%s' resolves to blocked IP %s (range %s)",
-                    hostname,
-                    ip_str,
-                    network,
-                )
-                raise ValueError(
-                    f"URL hostname '{hostname}' resolves to blocked IP range ({network}): {ip_str}"
-                )
+    for _family, _type, _proto, _canonname, sockaddr in addrinfo:
+        validate_resolved_endpoint_ip(hostname, sockaddr[0])
+
+
+def validate_resolved_endpoint_ip(hostname: str, ip_str: str) -> None:
+    """Validate one DNS answer immediately before an endpoint connection.
+
+    ``validate_endpoint_url`` performs an eager DNS check for fast feedback, but
+    HTTP clients resolve again when they connect.  Call this helper on the
+    resolver results that will actually be used for the socket so a hostname
+    cannot pass validation with a public address and later rebind to a private
+    one.
+    """
+    if os.environ.get("ASSERT_ALLOW_PRIVATE_ENDPOINTS", "").lower() in (
+        "1",
+        "true",
+        "yes",
+    ):
+        return
+    if hostname.lower() in _LOCAL_DEV_HOSTNAMES:
+        return
+
+    try:
+        ip = ipaddress.ip_address(ip_str)
+    except ValueError as exc:
+        raise ValueError(
+            f"Resolver returned a non-IP address for endpoint hostname '{hostname}': {ip_str}"
+        ) from exc
+
+    # IPv4-mapped IPv6 addresses inherit the security properties of the embedded
+    # IPv4 address (for example, ::ffff:127.0.0.1 is still loopback).
+    checked_ip = (
+        ip.ipv4_mapped
+        if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped
+        else ip
+    )
+
+    for network in _BLOCKED_IP_RANGES:
+        if checked_ip.version == network.version and checked_ip in network:
+            log.warning(
+                "SSRF protection: hostname '%s' resolves to blocked IP %s (range %s)",
+                hostname,
+                ip_str,
+                network,
+            )
+            raise ValueError(
+                f"URL hostname '{hostname}' resolves to blocked IP range ({network}): {ip_str}"
+            )
+
+    # Block unspecified, reserved, documentation, shared, and other special-use
+    # addresses as well as multicast.  SSRF targets must resolve to a publicly
+    # routable unicast address unless the explicit development override is set.
+    if not checked_ip.is_global or checked_ip.is_multicast:
+        log.warning(
+            "SSRF protection: hostname '%s' resolves to non-public IP %s",
+            hostname,
+            ip_str,
+        )
+        raise ValueError(
+            f"URL hostname '{hostname}' resolves to a non-public IP address: {ip_str}"
+        )
 
 
 # ── Credential sanitization ────────────────────────────────────
@@ -278,4 +317,3 @@ def sanitize_payload(payload: Any, *, depth: int = 0, max_depth: int = 10) -> An
             return _REDACTED
         return payload
     return payload
-

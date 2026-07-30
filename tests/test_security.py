@@ -145,6 +145,22 @@ class ValidateEndpointUrlTest(unittest.TestCase):
         with self.assertRaises(ValueError, msg="blocked"):
             validate_endpoint_url("http://168.63.129.16/metadata")
 
+    def test_unspecified_ipv4_blocked(self) -> None:
+        with self.assertRaises(ValueError, msg="non-public"):
+            validate_endpoint_url("http://0.0.0.0/api")
+
+    def test_unspecified_ipv6_blocked(self) -> None:
+        with self.assertRaises(ValueError, msg="non-public"):
+            validate_endpoint_url("http://[::]/api")
+
+    def test_ipv4_mapped_private_ip_blocked(self) -> None:
+        with self.assertRaises(ValueError, msg="blocked"):
+            validate_endpoint_url("http://[::ffff:127.0.0.1]/api")
+
+    def test_ipv4_mapped_azure_wireserver_blocked(self) -> None:
+        with self.assertRaises(ValueError, msg="blocked"):
+            validate_endpoint_url("http://[::ffff:168.63.129.16]/metadata")
+
     # ── Blocked hostnames ──
 
     def test_gcp_metadata_hostname_blocked(self) -> None:
@@ -183,6 +199,15 @@ class ValidateEndpointUrlTest(unittest.TestCase):
             with self.assertRaises(ValueError, msg="blocked IP range"):
                 validate_endpoint_url("http://evil-rebind.attacker.com/api")
 
+    def test_hostname_with_mixed_public_and_private_answers_blocked(self) -> None:
+        fake_addrinfo = [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0)),
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 0)),
+        ]
+        with patch("assert_ai.core.security.socket.getaddrinfo", return_value=fake_addrinfo):
+            with self.assertRaises(ValueError, msg="blocked IP range"):
+                validate_endpoint_url("http://mixed-answers.attacker.com/api")
+
     def test_dns_failure_allows_passthrough(self) -> None:
         with patch(
             "assert_ai.core.security.socket.getaddrinfo",
@@ -195,6 +220,9 @@ class ValidateEndpointUrlTest(unittest.TestCase):
 
     def test_public_ip_allowed(self) -> None:
         validate_endpoint_url("http://93.184.216.34/api")
+
+    def test_ipv4_mapped_public_ip_allowed(self) -> None:
+        validate_endpoint_url("http://[::ffff:93.184.216.34]/api")
 
     def test_public_hostname_with_public_ip_allowed(self) -> None:
         fake_addrinfo = [
