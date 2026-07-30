@@ -132,6 +132,13 @@ _BLOCKED_IP_RANGES = [
     ipaddress.ip_network("fe80::/10"),         # IPv6 link-local
 ]
 
+_NAT64_WELL_KNOWN_PREFIX = ipaddress.ip_network("64:ff9b::/96")
+_IPV4_COMPATIBLE_PREFIX = ipaddress.ip_network("::/96")
+_IPV4_COMPATIBLE_RESERVED = {
+    ipaddress.ip_address("::"),
+    ipaddress.ip_address("::1"),
+}
+
 _BLOCKED_HOSTNAMES = {
     "metadata.google.internal",
     "metadata.google.com",
@@ -218,6 +225,24 @@ def _validate_resolved_ips(hostname: str) -> None:
         validate_resolved_endpoint_ip(hostname, sockaddr[0])
 
 
+def _canonicalize_endpoint_ip(
+    ip: ipaddress.IPv4Address | ipaddress.IPv6Address,
+) -> ipaddress.IPv4Address | ipaddress.IPv6Address:
+    """Return the address an IPv4-in-IPv6 endpoint ultimately reaches."""
+    if not isinstance(ip, ipaddress.IPv6Address):
+        return ip
+
+    if ip.ipv4_mapped is not None:
+        return ip.ipv4_mapped
+
+    if ip in _NAT64_WELL_KNOWN_PREFIX or (
+        ip in _IPV4_COMPATIBLE_PREFIX and ip not in _IPV4_COMPATIBLE_RESERVED
+    ):
+        return ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF)
+
+    return ip
+
+
 def validate_resolved_endpoint_ip(hostname: str, ip_str: str) -> None:
     """Validate one DNS answer immediately before an endpoint connection.
 
@@ -243,13 +268,9 @@ def validate_resolved_endpoint_ip(hostname: str, ip_str: str) -> None:
             f"Resolver returned a non-IP address for endpoint hostname '{hostname}': {ip_str}"
         ) from exc
 
-    # IPv4-mapped IPv6 addresses inherit the security properties of the embedded
-    # IPv4 address (for example, ::ffff:127.0.0.1 is still loopback).
-    checked_ip = (
-        ip.ipv4_mapped
-        if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped
-        else ip
-    )
+    # Mapped, NAT64, and deprecated IPv4-compatible IPv6 addresses inherit the
+    # security properties of the IPv4 endpoint they ultimately reach.
+    checked_ip = _canonicalize_endpoint_ip(ip)
 
     for network in _BLOCKED_IP_RANGES:
         if checked_ip.version == network.version and checked_ip in network:

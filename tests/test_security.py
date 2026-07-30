@@ -153,6 +153,10 @@ class ValidateEndpointUrlTest(unittest.TestCase):
         with self.assertRaises(ValueError, msg="non-public"):
             validate_endpoint_url("http://[::]/api")
 
+    def test_ipv6_loopback_blocked(self) -> None:
+        with self.assertRaises(ValueError, msg="blocked"):
+            validate_endpoint_url("http://[::1]/api")
+
     def test_ipv4_mapped_private_ip_blocked(self) -> None:
         with self.assertRaises(ValueError, msg="blocked"):
             validate_endpoint_url("http://[::ffff:127.0.0.1]/api")
@@ -160,6 +164,22 @@ class ValidateEndpointUrlTest(unittest.TestCase):
     def test_ipv4_mapped_azure_wireserver_blocked(self) -> None:
         with self.assertRaises(ValueError, msg="blocked"):
             validate_endpoint_url("http://[::ffff:168.63.129.16]/metadata")
+
+    def test_nat64_loopback_blocked(self) -> None:
+        with self.assertRaises(ValueError, msg="blocked"):
+            validate_endpoint_url("http://[64:ff9b::7f00:1]/api")
+
+    def test_nat64_metadata_ip_blocked(self) -> None:
+        with self.assertRaises(ValueError, msg="blocked"):
+            validate_endpoint_url("http://[64:ff9b::a9fe:a9fe]/metadata")
+
+    def test_nat64_azure_wireserver_blocked(self) -> None:
+        with self.assertRaises(ValueError, msg="blocked"):
+            validate_endpoint_url("http://[64:ff9b::a83f:8110]/metadata")
+
+    def test_ipv4_compatible_loopback_blocked(self) -> None:
+        with self.assertRaises(ValueError, msg="blocked"):
+            validate_endpoint_url("http://[::127.0.0.1]/api")
 
     # ── Blocked hostnames ──
 
@@ -223,6 +243,12 @@ class ValidateEndpointUrlTest(unittest.TestCase):
 
     def test_ipv4_mapped_public_ip_allowed(self) -> None:
         validate_endpoint_url("http://[::ffff:93.184.216.34]/api")
+
+    def test_nat64_public_ip_allowed(self) -> None:
+        validate_endpoint_url("http://[64:ff9b::5db8:d822]/api")
+
+    def test_ipv4_compatible_public_ip_allowed(self) -> None:
+        validate_endpoint_url("http://[::93.184.216.34]/api")
 
     def test_public_hostname_with_public_ip_allowed(self) -> None:
         fake_addrinfo = [
